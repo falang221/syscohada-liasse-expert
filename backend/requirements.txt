@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pandas
+openpyxl
+pydantic-settings
+python-multipart
+sqlalchemy
+psycopg2-binary
+weasyprint

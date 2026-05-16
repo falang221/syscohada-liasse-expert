@@ -2,84 +2,146 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>{{ title }}</title>
+    <title>Liasse Fiscale SYSCOHADA</title>
     <style>
-        body { font-family: 'Helvetica', 'Arial', sans-serif; color: #333; line-height: 1.4; }
-        .header { text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 10px; margin-bottom: 20px; }
-        .cabinet { font-size: 14px; font-weight: bold; color: #2563eb; }
-        .dossier { font-size: 18px; margin-top: 5px; }
-        .meta { font-size: 12px; color: #666; }
+        @page { size: A4 portrait; margin: 1cm; }
+        body { font-family: 'Helvetica', 'Arial', sans-serif; font-size: 9pt; color: #000; margin: 0; padding: 0; }
+        .republic-header { text-align: center; font-weight: bold; font-size: 10pt; line-height: 1.2; margin-bottom: 20px; }
+        .republic-header .devise { font-style: italic; font-size: 8pt; font-weight: normal; }
+        .main-title { text-align: center; border: 1px solid #000; padding: 5px; font-weight: bold; font-size: 14pt; background-color: #f0f0f0; margin-bottom: 20px; }
+        .info-grid { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        .info-grid td { border: 1px solid #000; padding: 4px; font-size: 8pt; }
         
-        h2 { color: #1e40af; border-left: 5px solid #2563eb; padding-left: 10px; margin-top: 30px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f8fafc; font-size: 13px; color: #475569; }
-        .amount { text-align: right; font-family: 'Courier', monospace; }
-        .total-row { font-weight: bold; background-color: #f1f5f9; }
-        .footer { margin-top: 40px; font-size: 10px; text-align: center; color: #94a3b8; }
+        table.financial { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        table.financial th { border: 1px solid #000; padding: 4px; text-align: center; background-color: #f0f0f0; font-size: 8pt; }
+        table.financial td { border: 1px solid #000; padding: 3px 5px; font-size: 8pt; }
+        table.financial td.code { text-align: center; font-weight: bold; width: 30px; }
+        table.financial td.amount { text-align: right; font-family: 'Courier', monospace; width: 80px; }
+        table.financial td.note { text-align: center; width: 40px; }
+        .section-header { font-weight: bold; background-color: #e5e5e5; }
+        .total-row { font-weight: bold; background-color: #d4d4d4; }
     </style>
 </head>
 <body>
-    <div class="header">
-        <div class="cabinet">{{ cabinet_name }}</div>
-        <div class="dossier">{{ dossier_name }} - Exercice {{ exercice }}</div>
-        <div class="meta">Généré le {{ generated_at }}</div>
-        <h1>{{ title }}</h1>
+    <div class="republic-header">
+        RÉPUBLIQUE DU SÉNÉGAL<br>
+        MINISTÈRE DES FINANCES ET DU BUDGET<br>
+        DIRECTION GÉNÉRALE DES IMPÔTS ET DES DOMAINES<br>
+        <span class="devise">Un Peuple - Un But - Une Foi</span>
     </div>
 
-    {% for type, cats in statements.items() %}
-        {% if cats and type != 'unknown' %}
-            <h2>{{ type.replace('_', ' ').title() }}</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Rubrique SYSCOHADA</th>
-                        <th class="amount">Montant Brut</th>
-                        <th class="amount">Montant Net</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% set total = namespace(value=0) %}
-                    {% for name, values in cats.items() %}
-                        <tr>
-                            <td>{{ name }}</td>
-                            <td class="amount">{{ "{:,.0f}".format(values.brut).replace(',', ' ') }}</td>
-                            <td class="amount">{{ "{:,.0f}".format(values.net).replace(',', ' ') }}</td>
-                        </tr>
-                        {% set total.value = total.value + values.net %}
-                    {% endfor %}
-                    <tr class="total-row">
-                        <td>TOTAL {{ type.replace('_', ' ').upper() }}</td>
-                        <td class="amount">---</td>
-                        <td class="amount">{{ "{:,.0f}".format(total.value).replace(',', ' ') }}</td>
-                    </tr>
-                </tbody>
-            </table>
-        {% endif %}
-    {% endfor %}
+    <div class="main-title">ÉTATS FINANCIERS SYSTÈME COMPTABLE OHADA</div>
+
+    <table class="info-grid">
+        <tr>
+            <td width="50%"><strong>Désignation de l'entité :</strong> {{ dossier_name }}</td>
+            <td width="50%"><strong>Exercice clos le :</strong> 31/12/{{ exercice }}</td>
+        </tr>
+        <tr>
+            <td><strong>NINEA :</strong> _________________</td>
+            <td><strong>Cabinet / Préparateur :</strong> {{ cabinet_name }}</td>
+        </tr>
+    </table>
+
+    <!-- BILAN ACTIF -->
+    <div style="font-weight:bold; margin-bottom:5px; text-decoration: underline;">BILAN - ACTIF</div>
+    <table class="financial">
+        <thead>
+            <tr>
+                <th>Réf.</th>
+                <th>RUBRIQUES</th>
+                <th>Note</th>
+                <th>Brut (N)</th>
+                <th>Amort/Prov (N)</th>
+                <th>Net (N)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set total_brut = namespace(value=0) %}
+            {% set total_net = namespace(value=0) %}
+            {% for name, values in statements.bilan_actif.items() %}
+            <tr>
+                <td class="code">{{ values.code }}</td>
+                <td>{{ name }}</td>
+                <td class="note"></td>
+                <td class="amount">{{ "{:,.0f}".format(values.brut).replace(',', ' ') }}</td>
+                <td class="amount">0</td>
+                <td class="amount">{{ "{:,.0f}".format(values.net).replace(',', ' ') }}</td>
+            </tr>
+            {% set total_brut.value = total_brut.value + values.brut %}
+            {% set total_net.value = total_net.value + values.net %}
+            {% endfor %}
+            <tr class="total-row">
+                <td class="code">BZ</td>
+                <td>TOTAL ACTIF</td>
+                <td class="note"></td>
+                <td class="amount">{{ "{:,.0f}".format(total_brut.value).replace(',', ' ') }}</td>
+                <td class="amount">0</td>
+                <td class="amount">{{ "{:,.0f}".format(total_net.value).replace(',', ' ') }}</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <div style="page-break-after: always;"></div>
+
+    <!-- BILAN PASSIF -->
+    <div class="republic-header" style="margin-top: 20px;">
+        DIRECTION GÉNÉRALE DES IMPÔTS ET DES DOMAINES
+    </div>
+    <div style="font-weight:bold; margin-bottom:5px; text-decoration: underline;">BILAN - PASSIF</div>
+    <table class="financial">
+        <thead>
+            <tr>
+                <th>Réf.</th>
+                <th>RUBRIQUES</th>
+                <th>Note</th>
+                <th>Net (N)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set total_passif = namespace(value=0) %}
+            {% for name, values in statements.bilan_passif.items() %}
+            <tr>
+                <td class="code">{{ values.code }}</td>
+                <td>{{ name }}</td>
+                <td class="note"></td>
+                <td class="amount">{{ "{:,.0f}".format(values.net).replace(',', ' ') }}</td>
+            </tr>
+            {% set total_passif.value = total_passif.value + values.net %}
+            {% endfor %}
+            <tr class="total-row">
+                <td class="code">DZ</td>
+                <td>TOTAL PASSIF</td>
+                <td class="note"></td>
+                <td class="amount">{{ "{:,.0f}".format(total_passif.value).replace(',', ' ') }}</td>
+            </tr>
+        </tbody>
+    </table>
 
     {% if statements.unknown %}
-        <h2 style="color: #dc2626; border-left-color: #dc2626;">Comptes Non Classés (À Vérifier)</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Rubrique / Racine</th>
-                    <th class="amount">Montant Net</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for name, values in statements.unknown.items() %}
-                    <tr>
-                        <td>{{ name }}</td>
-                        <td class="amount">{{ "{:,.0f}".format(values.net).replace(',', ' ') }}</td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <div style="font-weight:bold; margin-top:20px; color: red;">COMPTES À RECLASSER (HORS BILAN DGID)</div>
+    <table class="financial">
+        <thead>
+            <tr>
+                <th>Réf.</th>
+                <th>Racine de compte</th>
+                <th>Montant</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for name, values in statements.unknown.items() %}
+            <tr>
+                <td class="code">XX</td>
+                <td>{{ name }}</td>
+                <td class="amount">{{ "{:,.0f}".format(values.net).replace(',', ' ') }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
     {% endif %}
 
-    <div class="footer">
-        Document généré par SYSCOHADA Liasse-Expert. Conforme au référentiel SYSCOHADA révisé.
+    <div style="position: absolute; bottom: 0; width: 100%; text-align: right; font-size: 8pt; color: #666;">
+        Page 1/2
     </div>
 </body>
 </html>

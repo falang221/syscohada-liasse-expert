@@ -5,6 +5,7 @@ import pandas as pd
 import io
 
 from app.services.excel_parser import parse_balance_df
+from app.services.financial_engine import compute_financial_statements
 from app.services.pdf_service import generate_liasse_pdf
 
 app = FastAPI(title="SYSCOHADA Liasse-Expert API")
@@ -31,30 +32,20 @@ async def generate_liasse(file: UploadFile = File(...)):
         # Read the Excel file into a pandas DataFrame
         df = pd.read_excel(io.BytesIO(contents))
         
-        # Parse the balance (currently a mock/basic implementation)
+        # Parse the balance
         parsed_data = parse_balance_df(df)
+        
+        # Use the financial engine to aggregate data
+        statements = compute_financial_statements(parsed_data)
         
         # Prepare data for PDF generation
         pdf_data = {
             "cabinet_name": "Cabinet d'Expertise Postefinances",
             "dossier_name": "Client Démo",
             "exercice": "2026",
-            "title": "Bilan SYSCOHADA (Aperçu)",
-            "table_rows": []
+            "title": "Liasse Fiscale SYSCOHADA (MVP)",
+            "statements": statements
         }
-        
-        # Simple mapping for demo purposes
-        for row in parsed_data:
-            # Assumes columns 'compte', 'intitulé', 'débit', 'crédit' exist, falling back safely
-            pdf_data["table_rows"].append({
-                "code": str(row.get("compte", "")),
-                "label": str(row.get("intitulé", row.get("compte", "Inconnu"))),
-                "brut": row.get("débit", 0) or row.get("solde_debit", 0),
-                "amort": 0,
-                "net_n": row.get("débit", 0) or row.get("solde_debit", 0),
-                "net_n_1": 0,
-                "is_total": False
-            })
             
         pdf_bytes = generate_liasse_pdf(pdf_data)
         

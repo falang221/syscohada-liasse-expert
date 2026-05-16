@@ -7,34 +7,73 @@ generator client {
   provider = "prisma-client-py"
 }
 
+enum UserRole {
+  ADMIN
+  COLLABORATOR
+}
+
 model Cabinet {
-  id    String   @id @default(cuid())
-  name  String
-  users User[]
-  dossiers Dossier[]
+  id        String    @id @default(cuid())
+  name      String
+  users     User[]
+  dossiers  Dossier[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 }
 
 model User {
-  id        String   @id @default(cuid())
-  username  String   @unique
-  role      String   @default("COLLABORATOR") // ADMIN, COLLABORATOR
-  cabinetId String
-  cabinet   Cabinet  @relation(fields: [cabinetId], references: [id])
+  id              String    @id @default(cuid())
+  username        String    @unique
+  hashed_password String
+  role            UserRole  @default(COLLABORATOR)
+  cabinetId       String
+  cabinet         Cabinet   @relation(fields: [cabinetId], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  @@index([cabinetId])
 }
 
 model Dossier {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   name      String
   year      Int
   cabinetId String
-  cabinet   Cabinet  @relation(fields: [cabinetId], references: [id])
+  cabinet   Cabinet   @relation(fields: [cabinetId], references: [id])
   mappings  AccountMapping[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([cabinetId])
 }
 
 model AccountMapping {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   account   String   // Root account (e.g., "601")
   rubrique  String   // SYSCOHADA Rubrique code
   dossierId String
   dossier   Dossier  @relation(fields: [dossierId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([dossierId])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  timestamp   DateTime @default(now())
+  userId      String?
+  action      String
+  entity      String
+  entityId    String?
+  oldValue    Json?
+  newValue    Json?
+  ipAddress   String?
+
+  @@index([userId])
+  @@index([entity, entityId])
 }

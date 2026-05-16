@@ -1,0 +1,40 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-py"
+}
+
+model Cabinet {
+  id    String   @id @default(cuid())
+  name  String
+  users User[]
+  dossiers Dossier[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  role      String   @default("COLLABORATOR") // ADMIN, COLLABORATOR
+  cabinetId String
+  cabinet   Cabinet  @relation(fields: [cabinetId], references: [id])
+}
+
+model Dossier {
+  id        String   @id @default(cuid())
+  name      String
+  year      Int
+  cabinetId String
+  cabinet   Cabinet  @relation(fields: [cabinetId], references: [id])
+  mappings  AccountMapping[]
+}
+
+model AccountMapping {
+  id        String   @id @default(cuid())
+  account   String   // Root account (e.g., "601")
+  rubrique  String   // SYSCOHADA Rubrique code
+  dossierId String
+  dossier   Dossier  @relation(fields: [dossierId], references: [id])
+}

@@ -1,5 +1,6 @@
 from typing import List, Dict, Optional
 from app.core.syscohada_rules import get_category_for_account
+from app.services.tafire_engine import compute_tafire
 
 def _aggregate_balance(parsed_balance: List[Dict]) -> Dict:
     """Helper to aggregate a single balance sheet."""
@@ -65,6 +66,9 @@ def compute_financial_statements(parsed_balance_n: List[Dict], parsed_balance_n_
                 "code": data_n.get("code", "XX") if data_n.get("code") != "XX" else agg_n_1.get(cat_type, {}).get(cat_name, {}).get("code", "XX")
             }
             
+    # Compute TAFIRE
+    statements["tafire"] = compute_tafire(statements)
+    
     # Debug info
     actif_total_n = sum(c['net'] for c in statements['bilan_actif'].values())
     actif_total_n_1 = sum(c['net_n_1'] for c in statements['bilan_actif'].values())

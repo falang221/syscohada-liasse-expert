@@ -1,0 +1,1 @@
+- [x] Task 1: Exécution du script d'installation\n- [x] Task 2: Vérification du déploiement\n- [ ] Task 3: Finalisation et Lancement

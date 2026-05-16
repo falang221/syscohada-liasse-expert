@@ -11,10 +11,27 @@ model Cabinet {
   id        String    @id @default(cuid())
   name      String
   users     User[]
-  dossiers  Dossier[]
+  clients   Client[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+}
+
+model Client {
+  id              String    @id @default(cuid())
+  name            String
+  ninea           String    @unique
+  rccm            String?
+  adresse         String?
+  capitalSocial   Float?
+  cabinetId       String
+  cabinet         Cabinet   @relation(fields: [cabinetId], references: [id])
+  dossiers        Dossier[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  @@index([cabinetId])
 }
 
 model User {
@@ -32,17 +49,18 @@ model User {
 }
 
 model Dossier {
-  id        String    @id @default(cuid())
-  name      String
-  year      Int
-  cabinetId String
-  cabinet   Cabinet   @relation(fields: [cabinetId], references: [id])
-  mappings  AccountMapping[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  id              String    @id @default(cuid())
+  year            Int
+  clientId        String
+  client          Client    @relation(fields: [clientId], references: [id])
+  tafireData      String?   // JSON string for adjustments (SQLite doesn't support Json well)
+  pdfUrl          String?
+  mappings        AccountMapping[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
 
-  @@index([cabinetId])
+  @@index([clientId])
 }
 
 model AccountMapping {

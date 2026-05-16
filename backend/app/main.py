@@ -4,6 +4,7 @@ from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordRequestForm
 import pandas as pd
 import io
+from typing import Optional
 
 from app.services.excel_parser import parse_balance_df
 from app.services.financial_engine import compute_financial_statements
@@ -50,29 +51,54 @@ async def read_users_me(current_user = Depends(get_current_user)):
     return {"username": current_user.username, "role": current_user.role}
 
 @app.post("/api/generate-liasse")
-async def generate_liasse(file: UploadFile = File(...), current_user = Depends(get_current_user)):
-    if not file.filename.endswith(('.xls', '.xlsx')):
-        raise HTTPException(status_code=400, detail="Invalid file type. Please upload an Excel file.")
+async def generate_liasse(
+    file_n: UploadFile = File(...), 
+    file_n_1: Optional[UploadFile] = File(None),
+    current_user = Depends(get_current_user)
+):
+    if not file_n.filename.endswith(('.xls', '.xlsx')):
+        raise HTTPException(status_code=400, detail="Invalid file type for Balance N. Please upload an Excel file.")
+    
+    print(f"DEBUG: Processing file N: {file_n.filename} (and N-1: {file_n_1.filename if file_n_1 else 'None'}) for user: {current_user.username}")
     
     try:
-        contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents))
-        parsed_data = parse_balance_df(df)
-        statements = compute_financial_statements(parsed_data)
+        # Process N
+        contents_n = await file_n.read()
+        df_n = pd.read_excel(io.BytesIO(contents_n), engine='openpyxl' if file_n.filename.endswith('.xlsx') else None)
+        parsed_data_n = parse_balance_df(df_n)
+        
+        if not parsed_data_n:
+             raise HTTPException(status_code=400, detail="No valid data found in Balance N.")
+
+        # Process N-1 if provided
+        parsed_data_n_1 = None
+        if file_n_1 and file_n_1.filename.strip():
+            try:
+                contents_n_1 = await file_n_1.read()
+                df_n_1 = pd.read_excel(io.BytesIO(contents_n_1), engine='openpyxl' if file_n_1.filename.endswith('.xlsx') else None)
+                parsed_data_n_1 = parse_balance_df(df_n_1)
+                print(f"DEBUG: Parsed N-1 data: {len(parsed_data_n_1)} rows")
+            except Exception as e_n1:
+                print(f"WARNING: Failed to parse N-1 file: {str(e_n1)}")
+                # Continue with only N if N-1 fails? Or raise? 
+                # Let's continue but log it.
+
+        statements = compute_financial_statements(parsed_data_n, parsed_data_n_1)
         
         pdf_data = {
-            "cabinet_name": "Cabinet d'Expertise Postefinances", # Could be fetched via current_user.cabinet
-            "dossier_name": "Client Démo",
+            "cabinet_name": "Cabinet d'Expertise Postefinances",
+            "dossier_name": file_n.filename.replace(".xlsx", "").replace(".xls", ""),
             "exercice": "2026",
-            "title": "Liasse Fiscale SYSCOHADA (MVP)",
+            "title": "Liasse Fiscale SYSCOHADA (Expert)",
             "statements": statements
         }
             
         pdf_bytes = generate_liasse_pdf(pdf_data)
         
         return Response(content=pdf_bytes, media_type="application/pdf", headers={
-            "Content-Disposition": f"attachment; filename=Liasse_{file.filename}.pdf"
+            "Content-Disposition": f"attachment; filename=Liasse_Comparatif_{file_n.filename}.pdf"
         })
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"ERROR during generation: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal Error: {str(e)}")

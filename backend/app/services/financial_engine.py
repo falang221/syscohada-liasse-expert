@@ -4,15 +4,9 @@ from app.core.syscohada_rules import get_category_for_account
 def compute_financial_statements(parsed_balance: List[Dict]) -> Dict:
     """
     Processes a list of raw accounts (parsed balance) and aggregates them
-    into SYSCOHADA reporting categories.
+    into SYSCOHADA reporting categories, including DGID codes.
     """
-    statements = {
-        "bilan_actif": {},
-        "bilan_passif": {},
-        "resultat_charge": {},
-        "resultat_produit": {},
-        "unknown": {}
-    }
+    statements = { "bilan_actif": {}, "bilan_passif": {}, "resultat_charge": {}, "resultat_produit": {}, "unknown": {} }
     
     for row in parsed_balance:
         # Robustly extract account and values, handling varying Excel column names
@@ -21,6 +15,7 @@ def compute_financial_statements(parsed_balance: List[Dict]) -> Dict:
         # Determine the net balance for the account
         debit = float(row.get("débit") or row.get("Debit") or row.get("debit") or 0.0)
         credit = float(row.get("crédit") or row.get("Credit") or row.get("credit") or 0.0)
+        
         solde_debit = float(row.get("solde_debit") or 0.0)
         solde_credit = float(row.get("solde_credit") or 0.0)
         
@@ -36,10 +31,11 @@ def compute_financial_statements(parsed_balance: List[Dict]) -> Dict:
         mapping = get_category_for_account(compte)
         cat_type = mapping["type"]
         cat_name = mapping["category"]
+        cat_code = mapping["code"]
         
         # Initialize category if not exists
         if cat_name not in statements[cat_type]:
-            statements[cat_type][cat_name] = {"brut": 0.0, "net": 0.0}
+            statements[cat_type][cat_name] = {"brut": 0.0, "amort": 0.0, "net": 0.0, "code": cat_code}
             
         # Add to category
         # Actif & Charges normally have debit balances
@@ -57,7 +53,7 @@ def compute_financial_statements(parsed_balance: List[Dict]) -> Dict:
         else:
             # Handle unclassified
             if cat_name not in statements["unknown"]:
-                statements["unknown"][cat_name] = {"brut": 0.0, "net": 0.0}
+                statements["unknown"][cat_name] = {"brut": 0.0, "amort": 0.0, "net": 0.0, "code": "XX"}
             statements["unknown"][cat_name]["brut"] += (solde_debit - solde_credit)
             statements["unknown"][cat_name]["net"] += (solde_debit - solde_credit)
             

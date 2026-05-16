@@ -1,8 +1,63 @@
-import { Upload, FileText, BarChart3, ShieldCheck } from "lucide-react";
+"use client";
+
+import { Upload, FileText, BarChart3, ShieldCheck, Loader2 } from "lucide-react";
+import { useState, useRef } from "react";
 
 export default function Home() {
+  const [isDragging, setIsDragging] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await uploadAndGenerate(file);
+    }
+  };
+
+  const uploadAndGenerate = async (file: File) => {
+    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+      setError("Veuillez sélectionner un fichier Excel (.xlsx ou .xls)");
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const response = await fetch("http://localhost:8000/api/generate-liasse", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || "Erreur lors de la génération de la liasse");
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Liasse_${file.name.replace(/\.[^/.]+$/, "")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+      // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   return (
-    <main className="flex min-height-screen flex-col items-center justify-between p-24">
+    <main className="flex min-h-screen flex-col items-center justify-between p-24 bg-secondary-50">
       <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
         <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
           SYSCOHADA&nbsp;
@@ -20,25 +75,53 @@ export default function Home() {
         </p>
 
         <div className="mt-12 w-full max-w-xl">
-          <div className="relative group cursor-pointer">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            accept=".xlsx,.xls" 
+            className="hidden" 
+          />
+          <div 
+            className="relative group cursor-pointer"
+            onClick={() => !isLoading && fileInputRef.current?.click()}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragging(false);
+              const file = e.dataTransfer.files[0];
+              if (file) uploadAndGenerate(file);
+            }}
+          >
             <div className="absolute -inset-1 bg-gradient-to-r from-primary-600 to-primary-400 rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
-            <div className="relative px-7 py-10 bg-white ring-1 ring-gray-900/5 rounded-2xl leading-none flex flex-col items-center justify-center space-y-4 border-2 border-dashed border-primary-200 hover:border-primary-400 transition-colors">
+            <div className={`relative px-7 py-10 bg-white ring-1 ring-gray-900/5 rounded-2xl leading-none flex flex-col items-center justify-center space-y-4 border-2 border-dashed ${isDragging ? 'border-primary-600 bg-primary-50' : 'border-primary-200 hover:border-primary-400'} transition-colors`}>
               <div className="bg-primary-50 p-4 rounded-full">
-                <Upload className="w-10 h-10 text-primary-600" />
+                {isLoading ? (
+                  <Loader2 className="w-10 h-10 text-primary-600 animate-spin" />
+                ) : (
+                  <Upload className="w-10 h-10 text-primary-600" />
+                )}
               </div>
               <div className="text-center">
                 <p className="text-xl font-semibold text-secondary-900">
-                  Déposez votre liasse fiscale ici
+                  {isLoading ? "Génération en cours..." : "Déposez votre Balance Générale (Excel)"}
                 </p>
                 <p className="text-sm text-secondary-500 mt-2">
-                  Format PDF supporté (Max 20 Mo)
+                  Format .xlsx ou .xls supporté
                 </p>
               </div>
-              <button className="bg-primary-600 text-white px-8 py-3 rounded-lg font-medium hover:bg-primary-700 transition-colors">
-                Sélectionner un fichier
+              <button 
+                disabled={isLoading}
+                className="bg-primary-600 text-white px-8 py-3 rounded-lg font-medium hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? "Traitement..." : "Sélectionner un fichier"}
               </button>
             </div>
           </div>
+          {error && (
+            <p className="mt-4 text-red-600 text-sm font-medium">{error}</p>
+          )}
         </div>
       </div>
 
@@ -47,9 +130,9 @@ export default function Home() {
           <div className="bg-primary-50 p-3 rounded-lg mb-4">
             <FileText className="w-6 h-6 text-primary-600" />
           </div>
-          <h3 className="text-lg font-bold text-secondary-900">Extraction OCR</h3>
+          <h3 className="text-lg font-bold text-secondary-900">Import Excel</h3>
           <p className="text-secondary-600 text-sm mt-2">
-            Reconnaissance précise des tableaux financiers et des notes annexes.
+            Reconnaissance précise de votre balance générale et grand livre.
           </p>
         </div>
         <div className="p-6 bg-white rounded-xl shadow-sm border border-secondary-100 flex flex-col items-center text-center">
@@ -58,16 +141,16 @@ export default function Home() {
           </div>
           <h3 className="text-lg font-bold text-secondary-900">Analyse Financière</h3>
           <p className="text-secondary-600 text-sm mt-2">
-            Calcul automatique des ratios et détection des anomalies comptables.
+            Mapping automatique des comptes selon le plan SYSCOHADA.
           </p>
         </div>
         <div className="p-6 bg-white rounded-xl shadow-sm border border-secondary-100 flex flex-col items-center text-center">
           <div className="bg-primary-50 p-3 rounded-lg mb-4">
             <ShieldCheck className="w-6 h-6 text-primary-600" />
           </div>
-          <h3 className="text-lg font-bold text-secondary-900">Conformité</h3>
+          <h3 className="text-lg font-bold text-secondary-900">Export PDF Officiel</h3>
           <p className="text-secondary-600 text-sm mt-2">
-            Vérification stricte par rapport au référentiel SYSCOHADA révisé.
+            Génération de la liasse au format requis par la DGID.
           </p>
         </div>
       </div>

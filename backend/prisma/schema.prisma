@@ -1,15 +1,10 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 generator client {
   provider = "prisma-client-py"
-}
-
-enum UserRole {
-  ADMIN
-  COLLABORATOR
 }
 
 model Cabinet {
@@ -26,7 +21,7 @@ model User {
   id              String    @id @default(cuid())
   username        String    @unique
   hashed_password String
-  role            UserRole  @default(COLLABORATOR)
+  role            String    @default("COLLABORATOR") // ADMIN, COLLABORATOR
   cabinetId       String
   cabinet         Cabinet   @relation(fields: [cabinetId], references: [id])
   createdAt       DateTime  @default(now())
@@ -70,8 +65,8 @@ model AuditLog {
   action      String
   entity      String
   entityId    String?
-  oldValue    Json?
-  newValue    Json?
+  oldValue    String?  // SQLite doesn't support Json as effectively, using String for demo
+  newValue    String?
   ipAddress   String?
 
   @@index([userId])

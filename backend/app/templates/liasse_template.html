@@ -5,19 +5,19 @@
     <title>Liasse Fiscale SYSCOHADA</title>
     <style>
         @page { size: A4 portrait; margin: 1cm; }
-        body { font-family: 'Helvetica', 'Arial', sans-serif; font-size: 9pt; color: #000; margin: 0; padding: 0; }
-        .republic-header { text-align: center; font-weight: bold; font-size: 10pt; line-height: 1.2; margin-bottom: 20px; }
-        .republic-header .devise { font-style: italic; font-size: 8pt; font-weight: normal; }
-        .main-title { text-align: center; border: 1px solid #000; padding: 5px; font-weight: bold; font-size: 14pt; background-color: #f0f0f0; margin-bottom: 20px; }
-        .info-grid { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-        .info-grid td { border: 1px solid #000; padding: 4px; font-size: 8pt; }
+        body { font-family: 'Helvetica', 'Arial', sans-serif; font-size: 8pt; color: #000; margin: 0; padding: 0; }
+        .republic-header { text-align: center; font-weight: bold; font-size: 9pt; line-height: 1.2; margin-bottom: 15px; }
+        .republic-header .devise { font-style: italic; font-size: 7pt; font-weight: normal; }
+        .main-title { text-align: center; border: 1px solid #000; padding: 5px; font-weight: bold; font-size: 12pt; background-color: #f0f0f0; margin-bottom: 15px; }
+        .info-grid { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+        .info-grid td { border: 1px solid #000; padding: 3px; font-size: 7pt; }
         
-        table.financial { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        table.financial th { border: 1px solid #000; padding: 4px; text-align: center; background-color: #f0f0f0; font-size: 8pt; }
-        table.financial td { border: 1px solid #000; padding: 3px 5px; font-size: 8pt; }
-        table.financial td.code { text-align: center; font-weight: bold; width: 30px; }
-        table.financial td.amount { text-align: right; font-family: 'Courier', monospace; width: 80px; }
-        table.financial td.note { text-align: center; width: 40px; }
+        table.financial { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        table.financial th { border: 1px solid #000; padding: 3px; text-align: center; background-color: #f0f0f0; font-size: 7pt; }
+        table.financial td { border: 1px solid #000; padding: 2px 4px; font-size: 7pt; }
+        table.financial td.code { text-align: center; font-weight: bold; width: 25px; }
+        table.financial td.amount { text-align: right; font-family: 'Courier', monospace; width: 70px; }
+        table.financial td.note { text-align: center; width: 30px; }
         .section-header { font-weight: bold; background-color: #e5e5e5; }
         .total-row { font-weight: bold; background-color: #d4d4d4; }
     </style>
@@ -54,11 +54,11 @@
                 <th>Brut (N)</th>
                 <th>Amort/Prov (N)</th>
                 <th>Net (N)</th>
+                <th>Net (N-1)</th>
             </tr>
         </thead>
         <tbody>
-            {% set total_brut = namespace(value=0) %}
-            {% set total_net = namespace(value=0) %}
+            {% set totals = namespace(brut=0, net=0, net_n1=0) %}
             {% for name, values in statements.bilan_actif.items() %}
             <tr>
                 <td class="code">{{ values.code }}</td>
@@ -67,17 +67,20 @@
                 <td class="amount">{{ "{:,.0f}".format(values.brut).replace(',', ' ') }}</td>
                 <td class="amount">0</td>
                 <td class="amount">{{ "{:,.0f}".format(values.net).replace(',', ' ') }}</td>
+                <td class="amount">{{ "{:,.0f}".format(values.net_n_1).replace(',', ' ') if values.net_n_1 else '' }}</td>
             </tr>
-            {% set total_brut.value = total_brut.value + values.brut %}
-            {% set total_net.value = total_net.value + values.net %}
+            {% set totals.brut = totals.brut + values.brut %}
+            {% set totals.net = totals.net + values.net %}
+            {% set totals.net_n1 = totals.net_n1 + values.net_n_1 %}
             {% endfor %}
             <tr class="total-row">
                 <td class="code">BZ</td>
                 <td>TOTAL ACTIF</td>
                 <td class="note"></td>
-                <td class="amount">{{ "{:,.0f}".format(total_brut.value).replace(',', ' ') }}</td>
+                <td class="amount">{{ "{:,.0f}".format(totals.brut).replace(',', ' ') }}</td>
                 <td class="amount">0</td>
-                <td class="amount">{{ "{:,.0f}".format(total_net.value).replace(',', ' ') }}</td>
+                <td class="amount">{{ "{:,.0f}".format(totals.net).replace(',', ' ') }}</td>
+                <td class="amount">{{ "{:,.0f}".format(totals.net_n1).replace(',', ' ') }}</td>
             </tr>
         </tbody>
     </table>
@@ -85,7 +88,7 @@
     <div style="page-break-after: always;"></div>
 
     <!-- BILAN PASSIF -->
-    <div class="republic-header" style="margin-top: 20px;">
+    <div class="republic-header" style="margin-top: 10px;">
         DIRECTION GÉNÉRALE DES IMPÔTS ET DES DOMAINES
     </div>
     <div style="font-weight:bold; margin-bottom:5px; text-decoration: underline;">BILAN - PASSIF</div>
@@ -96,52 +99,111 @@
                 <th>RUBRIQUES</th>
                 <th>Note</th>
                 <th>Net (N)</th>
+                <th>Net (N-1)</th>
             </tr>
         </thead>
         <tbody>
-            {% set total_passif = namespace(value=0) %}
+            {% set totals = namespace(net=0, net_n1=0) %}
             {% for name, values in statements.bilan_passif.items() %}
             <tr>
                 <td class="code">{{ values.code }}</td>
                 <td>{{ name }}</td>
                 <td class="note"></td>
                 <td class="amount">{{ "{:,.0f}".format(values.net).replace(',', ' ') }}</td>
+                <td class="amount">{{ "{:,.0f}".format(values.net_n_1).replace(',', ' ') if values.net_n_1 else '' }}</td>
             </tr>
-            {% set total_passif.value = total_passif.value + values.net %}
+            {% set totals.net = totals.net + values.net %}
+            {% set totals.net_n1 = totals.net_n1 + values.net_n_1 %}
             {% endfor %}
             <tr class="total-row">
                 <td class="code">DZ</td>
                 <td>TOTAL PASSIF</td>
                 <td class="note"></td>
-                <td class="amount">{{ "{:,.0f}".format(total_passif.value).replace(',', ' ') }}</td>
+                <td class="amount">{{ "{:,.0f}".format(totals.net).replace(',', ' ') }}</td>
+                <td class="amount">{{ "{:,.0f}".format(totals.net_n1).replace(',', ' ') }}</td>
             </tr>
         </tbody>
     </table>
 
-    {% if statements.unknown %}
-    <div style="font-weight:bold; margin-top:20px; color: red;">COMPTES À RECLASSER (HORS BILAN DGID)</div>
+    <div style="page-break-after: always;"></div>
+
+    <!-- COMPTE DE RESULTAT -->
+    <div class="republic-header" style="margin-top: 10px;">
+        DIRECTION GÉNÉRALE DES IMPÔTS ET DES DOMAINES
+    </div>
+    <div style="font-weight:bold; margin-bottom:5px; text-decoration: underline;">COMPTE DE RÉSULTAT</div>
+    
     <table class="financial">
         <thead>
             <tr>
                 <th>Réf.</th>
-                <th>Racine de compte</th>
-                <th>Montant</th>
+                <th>RUBRIQUES (CHARGES / PRODUITS)</th>
+                <th>Note</th>
+                <th>Net (N)</th>
+                <th>Net (N-1)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set total_res_n = namespace(val=0) %}
+            {% set total_res_n1 = namespace(val=0) %}
+            
+            <tr class="section-header"><td colspan="5">CHARGES</td></tr>
+            {% for name, values in statements.resultat_charge.items() %}
+            <tr>
+                <td class="code">{{ values.code }}</td>
+                <td>{{ name }}</td>
+                <td class="note"></td>
+                <td class="amount">{{ "{:,.0f}".format(values.net).replace(',', ' ') }}</td>
+                <td class="amount">{{ "{:,.0f}".format(values.net_n_1).replace(',', ' ') if values.net_n_1 else '' }}</td>
+            </tr>
+            {% set total_res_n.val = total_res_n.val - values.net %}
+            {% set total_res_n1.val = total_res_n1.val - values.net_n_1 %}
+            {% endfor %}
+
+            <tr class="section-header"><td colspan="5">PRODUITS</td></tr>
+            {% for name, values in statements.resultat_produit.items() %}
+            <tr>
+                <td class="code">{{ values.code }}</td>
+                <td>{{ name }}</td>
+                <td class="note"></td>
+                <td class="amount">{{ "{:,.0f}".format(values.net).replace(',', ' ') }}</td>
+                <td class="amount">{{ "{:,.0f}".format(values.net_n_1).replace(',', ' ') if values.net_n_1 else '' }}</td>
+            </tr>
+            {% set total_res_n.val = total_res_n.val + values.net %}
+            {% set total_res_n1.val = total_res_n1.val + values.net_n_1 %}
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div style="margin-top: 10px; border: 2px solid #000; padding: 10px; text-align: center; font-weight: bold; background-color: #f0f0f0;">
+        RÉSULTAT NET EXERCICE N : {{ "{:,.0f}".format(total_res_n.val).replace(',', ' ') }} FCFA<br>
+        RÉSULTAT NET EXERCICE N-1 : {{ "{:,.0f}".format(total_res_n1.val).replace(',', ' ') }} FCFA
+    </div>
+
+    {% if statements.unknown %}
+    <div style="font-weight:bold; margin-top:15px; color: red;">COMPTES À RECLASSER (AUDIT)</div>
+    <table class="financial">
+        <thead>
+            <tr>
+                <th>Racine</th>
+                <th class="amount">Net (N)</th>
+                <th class="amount">Net (N-1)</th>
             </tr>
         </thead>
         <tbody>
             {% for name, values in statements.unknown.items() %}
             <tr>
-                <td class="code">XX</td>
                 <td>{{ name }}</td>
                 <td class="amount">{{ "{:,.0f}".format(values.net).replace(',', ' ') }}</td>
+                <td class="amount">{{ "{:,.0f}".format(values.net_n_1).replace(',', ' ') if values.net_n_1 else '' }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
     {% endif %}
 
-    <div style="position: absolute; bottom: 0; width: 100%; text-align: right; font-size: 8pt; color: #666;">
-        Page 1/2
+    <div style="position: absolute; bottom: 0; width: 100%; text-align: right; font-size: 7pt; color: #666;">
+        Généré par SYSCOHADA Liasse-Expert. Page 1/2
     </div>
 </body>
 </html>

@@ -1,13 +1,23 @@
 "use client";
 
-import { Upload, FileText, BarChart3, ShieldCheck, Loader2 } from "lucide-react";
-import { useState, useRef } from "react";
+import { Upload, FileText, BarChart3, ShieldCheck, Loader2, LogOut, User as UserIcon } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
+  const { user, token, logout, isLoading: authLoading } = useAuth();
+  const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!authLoading && !token) {
+      router.push("/login");
+    }
+  }, [token, authLoading, router]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -30,10 +40,17 @@ export default function Home() {
     try {
       const response = await fetch("http://localhost:8000/api/generate-liasse", {
         method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        },
         body: formData,
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          logout();
+          return;
+        }
         const errorData = await response.json().catch(() => null);
         throw new Error(errorData?.detail || "Erreur lors de la génération de la liasse");
       }
@@ -51,10 +68,17 @@ export default function Home() {
       setError(err.message);
     } finally {
       setIsLoading(false);
-      // Reset input
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
+
+  if (authLoading || !token) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-secondary-50">
+        <Loader2 className="w-10 h-10 text-primary-600 animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24 bg-secondary-50">
@@ -63,6 +87,20 @@ export default function Home() {
           SYSCOHADA&nbsp;
           <code className="font-bold text-primary-600">Liasse Expert</code>
         </p>
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 bg-white px-4 py-2 rounded-xl border border-secondary-200 shadow-sm">
+            <UserIcon className="w-4 h-4 text-secondary-500" />
+            <span className="text-secondary-700 font-medium">{user?.username}</span>
+            <span className="text-[10px] bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">{user?.role}</span>
+          </div>
+          <button 
+            onClick={logout}
+            className="flex items-center space-x-2 text-secondary-500 hover:text-red-600 transition-colors p-2"
+            title="Déconnexion"
+          >
+            <LogOut className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -70,8 +108,7 @@ export default function Home() {
           Analyse Intelligente de <span className="text-primary-600">Liasses Fiscales</span>
         </h1>
         <p className="mt-6 text-lg leading-8 text-secondary-600 max-w-2xl">
-          Automatisez l'extraction et l'analyse de vos liasses fiscales SYSCOHADA.
-          Précision, rapidité et conformité garanties par l'IA.
+          Bonjour {user?.username}, automatisez l'extraction et l'analyse de vos liasses fiscales SYSCOHADA.
         </p>
 
         <div className="mt-12 w-full max-w-xl">
@@ -126,6 +163,7 @@ export default function Home() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl w-full mt-12 pb-24">
+        {/* Same info grid as before */}
         <div className="p-6 bg-white rounded-xl shadow-sm border border-secondary-100 flex flex-col items-center text-center">
           <div className="bg-primary-50 p-3 rounded-lg mb-4">
             <FileText className="w-6 h-6 text-primary-600" />

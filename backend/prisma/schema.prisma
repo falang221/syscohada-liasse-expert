@@ -41,6 +41,7 @@ model User {
   role            String    @default("COLLABORATOR") // ADMIN, COLLABORATOR
   cabinetId       String
   cabinet         Cabinet   @relation(fields: [cabinetId], references: [id])
+  payments        Payment[]
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
@@ -55,7 +56,9 @@ model Dossier {
   client          Client    @relation(fields: [clientId], references: [id])
   tafireData      String?   // JSON string for adjustments (SQLite doesn't support Json well)
   pdfUrl          String?
+  isPaid          Boolean   @default(false)
   mappings        AccountMapping[]
+  payments        Payment[]
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
@@ -89,4 +92,21 @@ model AuditLog {
 
   @@index([userId])
   @@index([entity, entityId])
+}
+
+model Payment {
+  id            String    @id @default(cuid())
+  amount        Float
+  currency      String    @default("XOF")
+  status        String    @default("PENDING") // PENDING, SUCCESS, FAILED
+  transactionId String?   @unique
+  dossierId     String
+  dossier       Dossier   @relation(fields: [dossierId], references: [id])
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([dossierId])
+  @@index([userId])
 }

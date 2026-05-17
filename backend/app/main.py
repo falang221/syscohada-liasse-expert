@@ -77,7 +77,15 @@ async def analyze_balances(
             parsed_data_n_1 = parse_balance_df(df_n_1)
 
         statements = compute_financial_statements(parsed_data_n, parsed_data_n_1)
-        return statements
+        
+        # Generate AI Commentary
+        from app.services.ai_service import generate_financial_commentary
+        ai_commentary = generate_financial_commentary(statements)
+        
+        return {
+            "statements": statements,
+            "ai_commentary": ai_commentary
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -88,6 +96,7 @@ async def generate_liasse(
     client_id: Optional[str] = Form(None),
     exercice: Optional[str] = Form("2024"),
     adjustments: Optional[str] = Form(None), # JSON string
+    ai_commentary: Optional[str] = Form(None),
     current_user = Depends(get_current_user)
 ):
     if not file_n.filename.endswith(('.xls', '.xlsx')):
@@ -155,7 +164,8 @@ async def generate_liasse(
             "client_info": client_info,
             "exercice": exercice,
             "title": "Liasse Fiscale SYSCOHADA (Expert)",
-            "statements": statements
+            "statements": statements,
+            "ai_commentary": ai_commentary
         }
             
         pdf_bytes = generate_liasse_pdf(pdf_data)

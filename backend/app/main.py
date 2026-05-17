@@ -14,7 +14,7 @@ from app.core.security import verify_password, create_access_token, ACCESS_TOKEN
 from datetime import timedelta
 from prisma import Prisma
 from app.api.deps import get_current_user, db
-from app.api import clients, users
+from app.api import clients, users, payments
 
 app = FastAPI(title="SYSCOHADA Liasse-Expert API")
 
@@ -28,6 +28,7 @@ app.add_middleware(
 
 app.include_router(clients.router, prefix="/api/clients", tags=["Clients"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
+app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 
 @app.on_event("startup")
 async def startup():

@@ -1,32 +1,44 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 generator client {
   provider = "prisma-client-py"
 }
 
-enum UserRole {
-  ADMIN
-  COLLABORATOR
-}
-
 model Cabinet {
   id        String    @id @default(cuid())
   name      String
   users     User[]
-  dossiers  Dossier[]
+  clients   Client[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+}
+
+model Client {
+  id              String    @id @default(cuid())
+  name            String
+  ninea           String    @unique
+  rccm            String?
+  adresse         String?
+  capitalSocial   Float?
+  cabinetId       String
+  cabinet         Cabinet   @relation(fields: [cabinetId], references: [id])
+  dossiers        Dossier[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  @@index([cabinetId])
 }
 
 model User {
   id              String    @id @default(cuid())
   username        String    @unique
   hashed_password String
-  role            UserRole  @default(COLLABORATOR)
+  role            String    @default("COLLABORATOR") // ADMIN, COLLABORATOR
   cabinetId       String
   cabinet         Cabinet   @relation(fields: [cabinetId], references: [id])
   createdAt       DateTime  @default(now())
@@ -37,17 +49,18 @@ model User {
 }
 
 model Dossier {
-  id        String    @id @default(cuid())
-  name      String
-  year      Int
-  cabinetId String
-  cabinet   Cabinet   @relation(fields: [cabinetId], references: [id])
-  mappings  AccountMapping[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  id              String    @id @default(cuid())
+  year            Int
+  clientId        String
+  client          Client    @relation(fields: [clientId], references: [id])
+  tafireData      String?   // JSON string for adjustments (SQLite doesn't support Json well)
+  pdfUrl          String?
+  mappings        AccountMapping[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
 
-  @@index([cabinetId])
+  @@index([clientId])
 }
 
 model AccountMapping {
@@ -70,8 +83,8 @@ model AuditLog {
   action      String
   entity      String
   entityId    String?
-  oldValue    Json?
-  newValue    Json?
+  oldValue    String?  // SQLite doesn't support Json as effectively, using String for demo
+  newValue    String?
   ipAddress   String?
 
   @@index([userId])

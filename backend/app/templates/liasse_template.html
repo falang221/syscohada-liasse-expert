@@ -20,6 +20,40 @@
         table.financial td.note { text-align: center; width: 30px; }
         .section-header { font-weight: bold; background-color: #e5e5e5; }
         .total-row { font-weight: bold; background-color: #d4d4d4; }
+
+        /* AI Commentary Styles */
+        .ai-commentary {
+            margin-top: 15px;
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid #000;
+            background-color: #fcfcfc;
+            line-height: 1.5;
+        }
+        .ai-commentary-title {
+            font-weight: bold;
+            font-size: 10pt;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #000;
+            padding-bottom: 5px;
+            text-align: center;
+            background-color: #f0f0f0;
+            padding-top: 5px;
+        }
+        .ai-content {
+            white-space: pre-wrap;
+            text-align: justify;
+            font-size: 8.5pt;
+        }
+
+        /* Footer configuration for WeasyPrint */
+        @page {
+            @bottom-right {
+                content: "Généré par SYSCOHADA Liasse-Expert. Page " counter(page) " / " counter(pages);
+                font-size: 7pt;
+                color: #666;
+            }
+        }
     </style>
 </head>
 <body>
@@ -38,10 +72,22 @@
             <td width="50%"><strong>Exercice clos le :</strong> 31/12/{{ exercice }}</td>
         </tr>
         <tr>
-            <td><strong>NINEA :</strong> _________________</td>
+            <td><strong>NINEA :</strong> {{ client_info.ninea if client_info.ninea else '_________________' }}</td>
+            <td><strong>RCCM :</strong> {{ client_info.rccm if client_info.rccm else '_________________' }}</td>
+        </tr>
+        <tr>
+            <td><strong>Adresse :</strong> {{ client_info.adresse if client_info.adresse else '_________________' }}</td>
             <td><strong>Cabinet / Préparateur :</strong> {{ cabinet_name }}</td>
         </tr>
     </table>
+
+    {% if ai_commentary %}
+    <div class="ai-commentary">
+        <div class="ai-commentary-title">NOTE DE SYNTHÈSE DE LA DIRECTION</div>
+        <div class="ai-content">{{ ai_commentary }}</div>
+    </div>
+    <div style="page-break-after: always;"></div>
+    {% endif %}
 
     <!-- BILAN ACTIF -->
     <div style="font-weight:bold; margin-bottom:5px; text-decoration: underline;">BILAN - ACTIF</div>
@@ -202,8 +248,86 @@
     </table>
     {% endif %}
 
-    <div style="position: absolute; bottom: 0; width: 100%; text-align: right; font-size: 7pt; color: #666;">
-        Généré par SYSCOHADA Liasse-Expert. Page 1/2
+    <div style="page-break-after: always;"></div>
+
+    <!-- TAFIRE -->
+    <div class="republic-header" style="margin-top: 10px;">
+        DIRECTION GÉNÉRALE DES IMPÔTS ET DES DOMAINES
     </div>
+    <div style="font-weight:bold; margin-bottom:15px; text-decoration: underline; text-align: center; font-size: 11pt;">
+        TABLEAU FINANCIER DES RESSOURCES ET DES EMPLOIS (TAFIRE)
+    </div>
+
+    <table class="financial">
+        <thead>
+            <tr>
+                <th>Réf.</th>
+                <th>FLUX DE TRÉSORERIE</th>
+                <th class="amount">MONTANT (N)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="section-header">
+                <td class="code">I</td>
+                <td colspan="2">FLUX DE TRÉSORERIE PROVENANT DES ACTIVITÉS OPÉRATIONNELLES</td>
+            </tr>
+            <tr>
+                <td class="code">FA</td>
+                <td>Capacité d'Autofinancement Globale (C.A.F.G) / Excédent Brut d'Exploitation</td>
+                <td class="amount">{{ "{:,.0f}".format(statements.tafire.activite).replace(',', ' ') }}</td>
+            </tr>
+            <tr class="total-row">
+                <td></td>
+                <td>TOTAL FLUX D'ACTIVITÉ (I)</td>
+                <td class="amount">{{ "{:,.0f}".format(statements.tafire.activite).replace(',', ' ') }}</td>
+            </tr>
+
+            <tr class="section-header">
+                <td class="code">II</td>
+                <td colspan="2">FLUX DE TRÉSORERIE PROVENANT DES ACTIVITÉS D'INVESTISSEMENT</td>
+            </tr>
+            <tr>
+                <td class="code">FB</td>
+                <td>Décaissements liés aux acquisitions d'immobilisations</td>
+                <td class="amount">{{ "{:,.0f}".format(statements.tafire.investissement).replace(',', ' ') }}</td>
+            </tr>
+            <tr class="total-row">
+                <td></td>
+                <td>TOTAL FLUX D'INVESTISSEMENT (II)</td>
+                <td class="amount">{{ "{:,.0f}".format(statements.tafire.investissement).replace(',', ' ') }}</td>
+            </tr>
+
+            <tr class="section-header">
+                <td class="code">III</td>
+                <td colspan="2">FLUX DE TRÉSORERIE PROVENANT DES ACTIVITÉS DE FINANCEMENT</td>
+            </tr>
+            <tr>
+                <td class="code">FC</td>
+                <td>Augmentations de capital / Emprunts</td>
+                <td class="amount">{{ "{:,.0f}".format(statements.tafire.financement).replace(',', ' ') }}</td>
+            </tr>
+            <tr class="total-row">
+                <td></td>
+                <td>TOTAL FLUX DE FINANCEMENT (III)</td>
+                <td class="amount">{{ "{:,.0f}".format(statements.tafire.financement).replace(',', ' ') }}</td>
+            </tr>
+
+            <tr style="background-color: #f0f0f0; font-weight: bold; font-size: 10pt;">
+                <td class="code">GT</td>
+                <td>VARIATION GLOBALE DE LA TRÉSORERIE (I + II + III)</td>
+                <td class="amount">{{ "{:,.0f}".format(statements.tafire.variation_tresorerie).replace(',', ' ') }}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div style="margin-top: 20px; padding: 10px; border: 1px dashed #000; font-size: 8pt;">
+        <strong>Note de cohérence :</strong> 
+        {% if statements.tafire.coherence_check %}
+            <span style="color: green;">✓ Cohérence validée : La variation de trésorerie correspond à la différence des soldes de trésorerie au bilan.</span>
+        {% else %}
+            <span style="color: orange;">⚠ Écart de cohérence détecté : Vérifiez les comptes de trésorerie et les reclassements d'immobilisations.</span>
+        {% endif %}
+    </div>
+
 </body>
 </html>

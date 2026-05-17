@@ -10,3 +10,4 @@ weasyprint
 prisma
 passlib[bcrypt]
 python-jose[cryptography]
+mistralai

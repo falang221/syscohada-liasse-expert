@@ -13,7 +13,7 @@ balance tronquée, un compte non mappé, ou une écriture de sens inversé.
 Implémentation : `backend/app/core/coherence.py`
 Mapping : `backend/app/core/syscohada_rules.py`
 Agrégation : `backend/app/services/financial_engine.py` (`_aggregate_balance`)
-Tests : `backend/tests/test_coherence.py` (45 tests)
+Tests : `backend/tests/test_coherence.py` (45) + `test_liasse_template.py` (8)
 
 ```python
 from app.core.coherence import check_balance_coherence, format_anomaly_report
@@ -159,7 +159,42 @@ donne `brut = 1 000 000`, `amort = 200 000`, `net = 800 000`, et le bilan est
 équilibré. Avant la correction, l'actif valait `1 000 000` et le bilan était
 rapporté déséquilibré de 200 000 XOF.
 
-## 6. Fixtures de test
+## 6. Restitution dans la liasse PDF
+
+`backend/app/templates/liasse_template.html` — tests : `backend/tests/test_liasse_template.py`
+
+### Colonne Amort/Prov
+
+La colonne était **codée en dur à `0`** dans le template (ligne de détail et
+ligne TOTAL ACTIF). Même une fois `amort` correctement alimenté par le moteur, le
+PDF aurait continué d'afficher zéro. Elle lit maintenant `values.amort` et le
+total agrège les amortissements.
+
+### Bandeau d'alerte
+
+Affiché en tête du BILAN - ACTIF uniquement si `statements.coherence.is_balanced`
+est faux : montant de l'écart, sens, renvoi vers l'annexe.
+
+### Annexe de contrôle
+
+Nouvelle page en fin de document, toujours présente quand la clé `coherence`
+existe :
+
+- Total Actif / Total Passif / écart / tolérance
+- si équilibré : mention de validation
+- sinon : totaux par classe SYSCOHADA, puis tableau des comptes suspects
+  (compte, classe, réf. DGID, débit, crédit, solde, motif)
+
+Le payload expose `coherence.classes` — la même donnée que `totaux_par_classe`
+mais avec le libellé attaché — pour éviter d'injecter `CLASS_LABELS` dans le
+contexte Jinja.
+
+### Rétrocompatibilité
+
+Un `statements` sans clé `coherence` se rend sans erreur : l'annexe et le bandeau
+sont simplement omis (`test_rendu_sans_cle_coherence_ne_casse_pas`).
+
+## 7. Fixtures de test
 
 Aucune donnée comptable réelle dans les tests. Deux fixtures de référence :
 
@@ -177,11 +212,11 @@ Aucune donnée comptable réelle dans les tests. Deux fixtures de référence :
 521 banque          200 000 D
 ```
 
-## 7. Commandes
+## 8. Commandes
 
 ```bash
 cd backend
-./venv/bin/pytest tests/test_coherence.py -v    # 45 tests
-./venv/bin/pytest tests/ -k coherence -q       # 45 tests, 11 deselected
-./venv/bin/pytest tests/ -q                    # suite complète, 56 tests
+./venv/bin/pytest tests/test_coherence.py -v        # 45 tests
+./venv/bin/pytest tests/test_liasse_template.py -v # 8 tests de rendu
+./venv/bin/pytest tests/ -q                        # suite complète, 64 tests
 ```

@@ -87,6 +87,16 @@ class CoherenceReport:
             "sens_ecart": self.sens_ecart,
             "tolerance": self.tolerance,
             "totaux_par_classe": self.totaux_par_classe,
+            # Same data with labels attached, so renderers do not need to
+            # import CLASS_LABELS into their template context.
+            "classes": [
+                {
+                    "classe": classe,
+                    "label": CLASS_LABELS.get(classe, f"Classe {classe}"),
+                    "total": total,
+                }
+                for classe, total in self.totaux_par_classe.items()
+            ],
             "anomalies": [
                 {
                     "compte": a.compte,

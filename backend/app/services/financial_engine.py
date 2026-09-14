@@ -1,6 +1,11 @@
+import logging
 from typing import List, Dict, Optional
+
+from app.core.coherence import check_balance_coherence
 from app.core.syscohada_rules import get_category_for_account
 from app.services.tafire_engine import compute_tafire
+
+logger = logging.getLogger(__name__)
 
 def _aggregate_balance(parsed_balance: List[Dict]) -> Dict:
     """Helper to aggregate a single balance sheet."""
@@ -68,10 +73,16 @@ def compute_financial_statements(parsed_balance_n: List[Dict], parsed_balance_n_
             
     # Compute TAFIRE
     statements["tafire"] = compute_tafire(statements)
-    
-    # Debug info
+
+    # SYSCOHADA invariant: Total Actif == Total Passif, checked on the raw
+    # trial balance so unmapped accounts are still visible as anomalies.
+    statements["coherence"] = check_balance_coherence(parsed_balance_n).to_dict()
+
     actif_total_n = sum(c['net'] for c in statements['bilan_actif'].values())
     actif_total_n_1 = sum(c['net_n_1'] for c in statements['bilan_actif'].values())
-    print(f"DEBUG: N-1 Engine complete. Actif Total N: {actif_total_n}, N-1: {actif_total_n_1}")
-    
+    logger.debug(
+        "N-1 engine complete. Actif total N: %s, N-1: %s, bilan equilibre: %s",
+        actif_total_n, actif_total_n_1, statements["coherence"]["is_balanced"],
+    )
+
     return statements

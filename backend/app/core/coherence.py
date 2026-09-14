@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal
 
-from app.core.syscohada_rules import get_category_for_account
+from app.core.syscohada_rules import get_category_for_account, resolve_tiers_side
 
 # Monetary tolerance in XOF. SYSCOHADA statements are presented in whole francs,
 # so anything at or below one franc is a rounding artefact, not an imbalance.
@@ -111,9 +111,14 @@ def get_account_class(compte: str) -> str:
     return acc[0] if acc else ""
 
 
-def _side_for(compte: str) -> Side:
+def _resolve(compte: str, solde_debiteur: float) -> Dict:
+    """Return the settled mapping for an account, tiers side included."""
+    return resolve_tiers_side(get_category_for_account(compte), solde_debiteur)
+
+
+def _side_for(compte: str, solde_debiteur: float = 0.0) -> Side:
     """Map an account to the balance-sheet side it contributes to."""
-    mapping = get_category_for_account(compte)
+    mapping = _resolve(compte, solde_debiteur)
     if mapping["type"] == "bilan_actif":
         return "actif"
     if mapping["type"] == "bilan_passif":
@@ -149,21 +154,33 @@ def check_balance_coherence(
         debit = float(row.get("debit", 0.0) or 0.0)
         credit = float(row.get("credit", 0.0) or 0.0)
         classe = get_account_class(compte)
-        side = _side_for(compte)
-        mapping = get_category_for_account(compte)
+        mapping = _resolve(compte, debit - credit)
+        side = _side_for(compte, debit - credit)
+        is_contra = mapping.get("contra", False)
 
-        # Actif accounts carry a debit balance, passif accounts a credit balance.
-        solde = debit - credit if side == "actif" else credit - debit
-
-        if side == "actif":
+        # Actif accounts carry a debit balance, passif accounts a credit
+        # balance. Contra accounts (amortissements, depreciations) sit on the
+        # actif side but carry a credit balance and are DEDUCTED from it.
+        if is_contra:
+            solde = credit - debit
+            total_actif -= solde
+            contribution = -solde
+        elif side == "actif":
+            solde = debit - credit
             total_actif += solde
+            contribution = solde
         elif side == "passif":
+            solde = credit - debit
             total_passif += solde
+            contribution = solde
+        else:
+            solde = debit - credit
+            contribution = solde
 
         if classe in BALANCE_SHEET_CLASSES:
-            totaux_par_classe[classe] = totaux_par_classe.get(classe, 0.0) + solde
+            totaux_par_classe[classe] = totaux_par_classe.get(classe, 0.0) + contribution
 
-        motif = _diagnose(compte, classe, side, solde, mapping["type"])
+        motif = _diagnose(compte, classe, side, solde, mapping["type"], is_contra)
         if motif:
             candidates.append(
                 AccountAnomaly(
@@ -200,12 +217,28 @@ def check_balance_coherence(
     )
 
 
-def _diagnose(compte: str, classe: str, side: Side, solde: float, cat_type: str) -> str:
+def _diagnose(
+    compte: str,
+    classe: str,
+    side: Side,
+    solde: float,
+    cat_type: str,
+    is_contra: bool = False,
+) -> str:
     """Return why an account is suspect, or an empty string when it is not.
 
     Only class 1-5 accounts can unbalance a balance sheet, so classes 6-8 are
     reported solely when they leak into the bilan, which would itself be a bug.
     """
+    if is_contra:
+        # A contra account's natural balance is credit, i.e. solde >= 0 here.
+        if solde < 0:
+            return (
+                f"Solde debiteur anormal pour un compte d'amortissement ou de "
+                f"depreciation (classe {classe}) - sens inverse probable"
+            )
+        return ""
+
     if classe not in BALANCE_SHEET_CLASSES:
         if side in ("actif", "passif"):
             return (

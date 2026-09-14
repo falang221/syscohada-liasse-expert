@@ -11,6 +11,8 @@ from app.core.coherence import (
     format_anomaly_report,
     get_account_class,
 )
+from app.core.syscohada_rules import get_category_for_account
+from app.services.financial_engine import compute_financial_statements
 
 
 @pytest.fixture
@@ -130,17 +132,18 @@ class TestBilanDesequilibre:
         assert "sens inverse" in anomaly.motif
 
     def test_signale_un_compte_de_bilan_non_mappe(self):
-        """Account 15 (provisions) is not in MAPPING_RULES: it silently drops
-        out of both totals, which is a prime cause of imbalance."""
+        """Account 14 (subventions d'investissement) is still absent from
+        MAPPING_RULES: it silently drops out of both totals, which is a prime
+        cause of imbalance. The detector must name it."""
         rows = [
             {"compte": "241", "debit": 500_000, "credit": 0},
-            {"compte": "151", "debit": 0, "credit": 200_000},  # classe 1, non mappe
+            {"compte": "141", "debit": 0, "credit": 200_000},  # classe 1, non mappe
             {"compte": "101", "debit": 0, "credit": 300_000},
         ]
         report = check_balance_coherence(rows)
 
         assert report.is_balanced is False
-        anomaly = next(a for a in report.anomalies if a.compte == "151")
+        anomaly = next(a for a in report.anomalies if a.compte == "141")
         assert anomaly.classe == "1"
         assert anomaly.side == "hors_bilan"
         assert "non mappe" in anomaly.motif
@@ -231,3 +234,149 @@ class TestCasLimites:
     )
     def test_extraction_de_la_classe(self, compte, classe):
         assert get_account_class(compte) == classe
+
+
+@pytest.mark.unit
+class TestMappingCorrige:
+    """Regression tests for the MAPPING_RULES gaps fixed on 2026-09-14."""
+
+    def test_151_provision_is_passif(self):
+        """Account 151 (provisions pour risques) is a passif resource.
+
+        Before the fix it matched no rule, vanished from both totals and made
+        an otherwise sound balance sheet look 200k short.
+        """
+        rows = [
+            {"compte": "241", "debit": 500_000, "credit": 0},
+            {"compte": "151", "debit": 0, "credit": 200_000},
+            {"compte": "101", "debit": 0, "credit": 300_000},
+        ]
+        report = check_balance_coherence(rows)
+
+        assert report.is_balanced is True
+        assert report.ecart == 0.0
+        assert report.total_actif == 500_000.0
+        assert report.total_passif == 500_000.0
+        assert report.anomalies == []
+
+    def test_28_amort_reduces_actif(self):
+        """Gross 1M of immobilisations minus 200k of amortissements nets 800k."""
+        rows = [
+            {"compte": "241", "debit": 1_000_000, "credit": 0},
+            {"compte": "2841", "debit": 0, "credit": 200_000},  # amortissement
+            {"compte": "101", "debit": 0, "credit": 800_000},
+        ]
+        report = check_balance_coherence(rows)
+
+        assert report.total_actif == 800_000.0, "l'amortissement doit etre deduit"
+        assert report.total_actif != 1_000_000.0, "le brut ne doit pas etre retenu"
+        assert report.is_balanced is True
+
+        # And the engine must present it brut / amort / net.
+        statements = compute_financial_statements(rows)
+        immo = statements["bilan_actif"]["Immobilisations incorporelles et corporelles"]
+        assert immo["brut"] == 1_000_000.0
+        assert immo["amort"] == 200_000.0
+        assert immo["net"] == 800_000.0
+
+    def test_39_depreciation_stocks_est_deduite(self):
+        """Regression: 39 used to match the broad ("3",) rule and be ADDED."""
+        rows = [
+            {"compte": "311", "debit": 500_000, "credit": 0},
+            {"compte": "391", "debit": 0, "credit": 100_000},  # depreciation
+            {"compte": "101", "debit": 0, "credit": 400_000},
+        ]
+        report = check_balance_coherence(rows)
+
+        assert report.total_actif == 400_000.0
+        assert report.is_balanced is True
+
+        stocks = compute_financial_statements(rows)["bilan_actif"]["Stocks"]
+        assert (stocks["brut"], stocks["amort"], stocks["net"]) == (
+            500_000.0, 100_000.0, 400_000.0,
+        )
+
+    @pytest.mark.parametrize(
+        "compte_contra,compte_actif,categorie",
+        [
+            ("491", "411", "Créances et emplois assimilés"),
+            ("591", "521", "Trésorerie-Actif"),
+            ("291", "261", "Immobilisations financières"),
+        ],
+    )
+    def test_depreciations_deduites(self, compte_contra, compte_actif, categorie):
+        rows = [
+            {"compte": compte_actif, "debit": 300_000, "credit": 0},
+            {"compte": compte_contra, "debit": 0, "credit": 50_000},
+            {"compte": "101", "debit": 0, "credit": 250_000},
+        ]
+        report = check_balance_coherence(rows)
+
+        assert report.total_actif == 250_000.0
+        assert report.is_balanced is True
+
+        bucket = compute_financial_statements(rows)["bilan_actif"][categorie]
+        assert bucket["net"] == 250_000.0
+
+    def test_amort_avant_immobilisation_dans_la_balance(self):
+        """Row order must not matter: a contra row may precede its asset."""
+        rows = [
+            {"compte": "2841", "debit": 0, "credit": 200_000},
+            {"compte": "241", "debit": 1_000_000, "credit": 0},
+            {"compte": "101", "debit": 0, "credit": 800_000},
+        ]
+        immo = compute_financial_statements(rows)["bilan_actif"][
+            "Immobilisations incorporelles et corporelles"
+        ]
+        assert (immo["brut"], immo["amort"], immo["net"]) == (
+            1_000_000.0, 200_000.0, 800_000.0,
+        )
+
+    def test_tiers_debiteur_va_en_actif(self):
+        rows = [
+            {"compte": "471", "debit": 150_000, "credit": 0},  # solde debiteur
+            {"compte": "101", "debit": 0, "credit": 150_000},
+        ]
+        report = check_balance_coherence(rows)
+
+        assert report.total_actif == 150_000.0
+        assert report.total_passif == 150_000.0
+        assert report.is_balanced is True
+
+    def test_tiers_crediteur_va_en_passif(self):
+        rows = [
+            {"compte": "471", "debit": 0, "credit": 150_000},  # solde crediteur
+            {"compte": "521", "debit": 150_000, "credit": 0},
+        ]
+        report = check_balance_coherence(rows)
+
+        assert report.total_actif == 150_000.0
+        assert report.total_passif == 150_000.0
+        assert report.is_balanced is True
+
+    @pytest.mark.parametrize(
+        "prefixe,type_attendu",
+        [
+            ("151", "bilan_passif"), ("181", "bilan_passif"), ("191", "bilan_passif"),
+            ("251", "bilan_actif"), ("551", "bilan_actif"), ("571", "bilan_actif"),
+            ("581", "bilan_actif"),
+        ],
+    )
+    def test_prefixes_manquants_desormais_mappes(self, prefixe, type_attendu):
+        assert get_category_for_account(prefixe)["type"] == type_attendu
+
+    @pytest.mark.parametrize("compte", ["281", "291", "391", "491", "591"])
+    def test_comptes_contra_marques(self, compte):
+        assert get_category_for_account(compte)["contra"] is True
+
+    def test_sens_inverse_sur_un_compte_damortissement(self):
+        """A debit balance on a 28 account is itself an anomaly."""
+        rows = [
+            {"compte": "2841", "debit": 50_000, "credit": 0},  # sens inverse
+            {"compte": "101", "debit": 0, "credit": 10_000},
+        ]
+        report = check_balance_coherence(rows)
+
+        assert report.is_balanced is False
+        anomaly = next(a for a in report.anomalies if a.compte == "2841")
+        assert "sens inverse" in anomaly.motif

@@ -7,3 +7,7 @@ python-multipart
 sqlalchemy
 psycopg2-binary
 weasyprint
+prisma
+passlib[bcrypt]
+python-jose[cryptography]
+mistralai

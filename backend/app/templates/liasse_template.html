@@ -46,6 +46,20 @@
             font-size: 8.5pt;
         }
 
+        /* Balance-sheet coherence banner */
+        .coherence-banner {
+            margin-bottom: 12px;
+            padding: 6px 8px;
+            border: 2px solid #000;
+            font-size: 8pt;
+            font-weight: bold;
+            text-align: center;
+        }
+        .coherence-banner.ko { background-color: #e8e8e8; }
+        .coherence-banner .ecart { font-family: 'Courier', monospace; }
+        .coherence-annex { page-break-inside: avoid; margin-top: 15px; }
+        .coherence-annex .motif { font-size: 6.5pt; }
+
         /* Footer configuration for WeasyPrint */
         @page {
             @bottom-right {
@@ -89,6 +103,14 @@
     <div style="page-break-after: always;"></div>
     {% endif %}
 
+    {% if statements.coherence and not statements.coherence.is_balanced %}
+    <div class="coherence-banner ko">
+        ⚠ BILAN NON ÉQUILIBRÉ — écart de
+        <span class="ecart">{{ "{:,.0f}".format(statements.coherence.ecart|abs).replace(',', ' ') }}</span> FCFA
+        ({{ statements.coherence.sens_ecart }}) — voir l'annexe de contrôle en fin de document
+    </div>
+    {% endif %}
+
     <!-- BILAN ACTIF -->
     <div style="font-weight:bold; margin-bottom:5px; text-decoration: underline;">BILAN - ACTIF</div>
     <table class="financial">
@@ -104,18 +126,19 @@
             </tr>
         </thead>
         <tbody>
-            {% set totals = namespace(brut=0, net=0, net_n1=0) %}
+            {% set totals = namespace(brut=0, amort=0, net=0, net_n1=0) %}
             {% for name, values in statements.bilan_actif.items() %}
             <tr>
                 <td class="code">{{ values.code }}</td>
                 <td>{{ name }}</td>
                 <td class="note"></td>
                 <td class="amount">{{ "{:,.0f}".format(values.brut).replace(',', ' ') }}</td>
-                <td class="amount">0</td>
+                <td class="amount">{{ "{:,.0f}".format(values.amort).replace(',', ' ') }}</td>
                 <td class="amount">{{ "{:,.0f}".format(values.net).replace(',', ' ') }}</td>
                 <td class="amount">{{ "{:,.0f}".format(values.net_n_1).replace(',', ' ') if values.net_n_1 else '' }}</td>
             </tr>
             {% set totals.brut = totals.brut + values.brut %}
+            {% set totals.amort = totals.amort + values.amort %}
             {% set totals.net = totals.net + values.net %}
             {% set totals.net_n1 = totals.net_n1 + values.net_n_1 %}
             {% endfor %}
@@ -124,7 +147,7 @@
                 <td>TOTAL ACTIF</td>
                 <td class="note"></td>
                 <td class="amount">{{ "{:,.0f}".format(totals.brut).replace(',', ' ') }}</td>
-                <td class="amount">0</td>
+                <td class="amount">{{ "{:,.0f}".format(totals.amort).replace(',', ' ') }}</td>
                 <td class="amount">{{ "{:,.0f}".format(totals.net).replace(',', ' ') }}</td>
                 <td class="amount">{{ "{:,.0f}".format(totals.net_n1).replace(',', ' ') }}</td>
             </tr>
@@ -328,6 +351,101 @@
             <span style="color: orange;">⚠ Écart de cohérence détecté : Vérifiez les comptes de trésorerie et les reclassements d'immobilisations.</span>
         {% endif %}
     </div>
+
+    {% if statements.coherence %}
+    <div style="page-break-before: always;"></div>
+    <div class="republic-header" style="margin-top: 10px;">
+        DIRECTION GÉNÉRALE DES IMPÔTS ET DES DOMAINES
+    </div>
+    <div class="main-title">ANNEXE DE CONTRÔLE — ÉQUILIBRE DU BILAN</div>
+
+    <div class="coherence-annex">
+        <table class="financial">
+            <tbody>
+                <tr>
+                    <td><strong>Total Actif</strong></td>
+                    <td class="amount">{{ "{:,.0f}".format(statements.coherence.total_actif).replace(',', ' ') }}</td>
+                </tr>
+                <tr>
+                    <td><strong>Total Passif</strong></td>
+                    <td class="amount">{{ "{:,.0f}".format(statements.coherence.total_passif).replace(',', ' ') }}</td>
+                </tr>
+                <tr class="total-row">
+                    <td>ÉCART ({{ statements.coherence.sens_ecart }})</td>
+                    <td class="amount">{{ "{:,.0f}".format(statements.coherence.ecart).replace(',', ' ') }}</td>
+                </tr>
+                <tr>
+                    <td>Tolérance appliquée</td>
+                    <td class="amount">{{ "{:,.0f}".format(statements.coherence.tolerance).replace(',', ' ') }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        {% if statements.coherence_n_1 and not statements.coherence_n_1.is_balanced %}
+        <div class="coherence-banner ko" style="margin-top: 8px;">
+            ⚠ EXERCICE N-1 NON ÉQUILIBRÉ — écart de
+            <span class="ecart">{{ "{:,.0f}".format(statements.coherence_n_1.ecart|abs).replace(',', ' ') }}</span> FCFA
+            ({{ statements.coherence_n_1.sens_ecart }})
+        </div>
+        {% endif %}
+
+        {% if statements.coherence.is_balanced %}
+        <div style="padding: 10px; border: 1px dashed #000; font-size: 8pt;">
+            <span style="color: green;">✓ Bilan équilibré : Total Actif = Total Passif.</span>
+        </div>
+        {% else %}
+        <div style="font-weight:bold; margin: 12px 0 5px; text-decoration: underline;">
+            TOTAUX PAR CLASSE SYSCOHADA
+        </div>
+        <table class="financial">
+            <thead>
+                <tr><th>Classe</th><th>Intitulé</th><th>Solde</th></tr>
+            </thead>
+            <tbody>
+                {% for c in statements.coherence.classes %}
+                <tr>
+                    <td class="code">{{ c.classe }}</td>
+                    <td>{{ c.label }}</td>
+                    <td class="amount">{{ "{:,.0f}".format(c.total).replace(',', ' ') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if statements.coherence.anomalies %}
+        <div style="font-weight:bold; margin: 12px 0 5px; text-decoration: underline;">
+            COMPTES SUSPECTS ({{ statements.coherence.anomalies|length }})
+        </div>
+        <table class="financial">
+            <thead>
+                <tr>
+                    <th>Compte</th><th>Classe</th><th>Réf.</th>
+                    <th>Débit</th><th>Crédit</th><th>Solde</th><th>Motif</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in statements.coherence.anomalies %}
+                <tr>
+                    <td class="code">{{ a.compte }}</td>
+                    <td>{{ a.classe_label }}</td>
+                    <td class="code">{{ a.code_dgid }}</td>
+                    <td class="amount">{{ "{:,.0f}".format(a.debit).replace(',', ' ') }}</td>
+                    <td class="amount">{{ "{:,.0f}".format(a.credit).replace(',', ' ') }}</td>
+                    <td class="amount">{{ "{:,.0f}".format(a.solde).replace(',', ' ') }}</td>
+                    <td class="motif">{{ a.motif }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div style="padding: 10px; border: 1px dashed #000; font-size: 8pt;">
+            Aucun compte individuellement suspect : l'écart provient probablement d'une
+            écriture manquante ou d'un compte absent de la balance importée.
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% endif %}
 
 </body>
 </html>

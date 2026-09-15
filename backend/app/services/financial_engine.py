@@ -1,45 +1,109 @@
+import logging
 from typing import List, Dict, Optional
-from app.core.syscohada_rules import get_category_for_account
+
+from app.core.coherence import check_balance_coherence
+from app.core.syscohada_rules import (
+    get_category_for_account,
+    mirror_prefix,
+    resolve_tiers_side,
+)
 from app.services.tafire_engine import compute_tafire
 
+logger = logging.getLogger(__name__)
+
+def _ensure_bucket(res: Dict, cat_type: str, cat_name: str, cat_code: str) -> Dict:
+    """Return the accumulator for a category, creating it when needed."""
+    if cat_name not in res[cat_type]:
+        res[cat_type][cat_name] = {"brut": 0.0, "amort": 0.0, "net": 0.0, "code": cat_code}
+    return res[cat_type][cat_name]
+
+
 def _aggregate_balance(parsed_balance: List[Dict]) -> Dict:
-    """Helper to aggregate a single balance sheet."""
+    """Aggregate a parsed trial balance into SYSCOHADA statement buckets.
+
+    Three passes:
+
+    1. Non-contra rows. Sign-based tiers accounts (45-48) are resolved here,
+       and every actif landing is recorded by two-digit prefix so contra
+       accounts can find it.
+    2. Contra rows. 28/39/59 use their static `reduces` target. 29/49 follow
+       the mirror convention (49D reduces 4D, 29D reduces 2D) and land in the
+       bucket their mirror actually reached in pass 1 - which may be BJ
+       "Autres créances" rather than BA. Whatever the route, a contra is
+       imputed ONLY onto a bucket pass 1 filled with a non-zero brut. Missing
+       target, settled account (debit == credit) or a mirror resolved to the
+       passif side all leave it unimputed: an amort column over an empty brut
+       would render a negative net line.
+    3. net = brut - amort.
+    """
     res = { "bilan_actif": {}, "bilan_passif": {}, "resultat_charge": {}, "resultat_produit": {}, "unknown": {} }
     if not parsed_balance:
         return res
-        
+
+    contra_rows = []
+    # Two-digit prefix -> category name, for actif landings only.
+    landed_actif: Dict[str, str] = {}
+
+    # --- Pass 1: non-contra rows -------------------------------------------
     for row in parsed_balance:
-        compte = str(row.get("compte", ""))
-        debit = float(row.get("debit", 0.0))
-        credit = float(row.get("credit", 0.0))
-        
-        # Calculate net balance for the year
-        # In a trial balance: Debit - Credit
-        net_balance = debit - credit
-        
-        mapping = get_category_for_account(compte)
+        compte = str(row.get("compte", "")).strip()
+        if not compte:
+            continue
+        debit = float(row.get("debit", 0.0) or 0.0)
+        credit = float(row.get("credit", 0.0) or 0.0)
+
+        # In a trial balance the debit-side balance is debit - credit.
+        solde_debiteur = debit - credit
+
+        mapping = resolve_tiers_side(get_category_for_account(compte), solde_debiteur)
         cat_type = mapping["type"]
         cat_name = mapping["category"]
         cat_code = mapping["code"]
-        
-        if cat_name not in res[cat_type]:
-            res[cat_type][cat_name] = {"brut": 0.0, "amort": 0.0, "net": 0.0, "code": cat_code}
-            
-        if cat_type in ["bilan_actif", "resultat_charge"]:
-            # Normal balance is Debit
-            res[cat_type][cat_name]["brut"] += net_balance
-            res[cat_type][cat_name]["net"] += net_balance
-        elif cat_type in ["bilan_passif", "resultat_produit"]:
-            # Normal balance is Credit (so we take Credit - Debit)
-            val = credit - debit
-            res[cat_type][cat_name]["brut"] += val
-            res[cat_type][cat_name]["net"] += val
+
+        if mapping.get("contra"):
+            contra_rows.append((compte, debit, credit, mapping))
+            continue
+
+        if cat_type in ("bilan_actif", "resultat_charge"):
+            # Normal balance is debit.
+            _ensure_bucket(res, cat_type, cat_name, cat_code)["brut"] += solde_debiteur
+        elif cat_type in ("bilan_passif", "resultat_produit"):
+            # Normal balance is credit.
+            _ensure_bucket(res, cat_type, cat_name, cat_code)["brut"] += credit - debit
         else:
-            # Handle unclassified
-            if cat_name not in res["unknown"]:
-                res["unknown"][cat_name] = {"brut": 0.0, "amort": 0.0, "net": 0.0, "code": "XX"}
-            res["unknown"][cat_name]["brut"] += net_balance
-            res["unknown"][cat_name]["net"] += net_balance
+            _ensure_bucket(res, "unknown", cat_name, "XX")["brut"] += solde_debiteur
+
+        if cat_type == "bilan_actif":
+            landed_actif[compte[:2]] = cat_name
+
+    # --- Pass 2: contra rows ------------------------------------------------
+    for compte, debit, credit, mapping in contra_rows:
+        if mapping.get("mirror"):
+            prefix = mirror_prefix(compte)
+            target = landed_actif.get(prefix) if prefix else None
+        else:
+            target = mapping.get("reduces", mapping["category"])
+
+        # Read-only probe: _ensure_bucket would create the very phantom we are
+        # trying to avoid. A contra is imputed only onto a bucket that pass 1
+        # actually filled - an amort over a zero brut renders a negative line.
+        bucket = res["bilan_actif"].get(target) if target else None
+        if bucket is None or bucket["brut"] == 0.0:
+            # Orphan contra. check_balance_coherence reports it and still
+            # deducts it from Total Actif; no bucket is created here.
+            logger.warning(
+                "Contra %s non impute : cible '%s' absente ou de brut nul",
+                compte, target or "introuvable",
+            )
+            continue
+
+        bucket["amort"] += credit - debit
+
+    # --- Pass 3: net = brut - amort. Only actif carries an amort column. ----
+    for cat_type, buckets in res.items():
+        for bucket in buckets.values():
+            bucket["net"] = bucket["brut"] - bucket["amort"]
+
     return res
 
 def compute_financial_statements(parsed_balance_n: List[Dict], parsed_balance_n_1: Optional[List[Dict]] = None) -> Dict:
@@ -68,10 +132,18 @@ def compute_financial_statements(parsed_balance_n: List[Dict], parsed_balance_n_
             
     # Compute TAFIRE
     statements["tafire"] = compute_tafire(statements)
-    
-    # Debug info
+
+    # SYSCOHADA invariant: Total Actif == Total Passif, checked on the raw
+    # trial balance so unmapped accounts are still visible as anomalies.
+    statements["coherence"] = check_balance_coherence(parsed_balance_n).to_dict()
+    if parsed_balance_n_1:
+        statements["coherence_n_1"] = check_balance_coherence(parsed_balance_n_1).to_dict()
+
     actif_total_n = sum(c['net'] for c in statements['bilan_actif'].values())
     actif_total_n_1 = sum(c['net_n_1'] for c in statements['bilan_actif'].values())
-    print(f"DEBUG: N-1 Engine complete. Actif Total N: {actif_total_n}, N-1: {actif_total_n_1}")
-    
+    logger.debug(
+        "N-1 engine complete. Actif total N: %s, N-1: %s, bilan equilibre: %s",
+        actif_total_n, actif_total_n_1, statements["coherence"]["is_balanced"],
+    )
+
     return statements

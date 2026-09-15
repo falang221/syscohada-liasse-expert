@@ -301,7 +301,11 @@ class TestMappingCorrige:
         [
             ("491", "411", "Créances et emplois assimilés"),
             ("591", "521", "Trésorerie-Actif"),
-            ("291", "261", "Immobilisations financières"),
+            # 296 mirrors 26x (titres de participation). The previous pairing
+            # (291, 261) was itself wrong: 291 depreciates 21x, not 26x.
+            ("296", "261", "Immobilisations financières"),
+            ("291", "211", "Immobilisations incorporelles et corporelles"),
+            ("294", "241", "Immobilisations incorporelles et corporelles"),
         ],
     )
     def test_depreciations_deduites(self, compte_contra, compte_actif, categorie):
@@ -368,6 +372,102 @@ class TestMappingCorrige:
     @pytest.mark.parametrize("compte", ["281", "291", "391", "491", "591"])
     def test_comptes_contra_marques(self, compte):
         assert get_category_for_account(compte)["contra"] is True
+
+    def test_496_reduit_autres_creances(self):
+        """A 496 depreciation must hit the bucket its mirror 46x landed in.
+
+        461 debiteur is aggregated into "Autres créances" (BJ), not into the
+        41x "Créances et emplois assimilés" bucket (BA). Before the mirror
+        logic, 496 fed BA - which had brut 0 - producing a negative net line
+        while 461 stayed presented gross.
+        """
+        rows = [
+            {"compte": "461", "debit": 300_000, "credit": 0},
+            {"compte": "496", "debit": 0, "credit": 50_000},
+            {"compte": "101", "debit": 0, "credit": 250_000},
+        ]
+        statements = compute_financial_statements(rows)
+        actif = statements["bilan_actif"]
+
+        autres = actif["Autres créances"]
+        assert (autres["brut"], autres["amort"], autres["net"]) == (
+            300_000.0, 50_000.0, 250_000.0,
+        )
+
+        # No phantom bucket on the clients line.
+        assert actif.get("Créances et emplois assimilés", {}).get("amort", 0.0) == 0.0
+
+        report = check_balance_coherence(rows)
+        assert report.total_actif == 250_000.0
+        assert report.is_balanced is True
+
+    def test_depreciation_49x_sans_miroir(self):
+        """A 496 with no 46x on the actif side must not invent a bucket."""
+        rows = [
+            {"compte": "681", "debit": 50_000, "credit": 0},  # dotation, classe 6
+            {"compte": "496", "debit": 0, "credit": 50_000},
+        ]
+        actif = compute_financial_statements(rows)["bilan_actif"]
+
+        assert all(
+            b["amort"] == 0.0 or b["brut"] != 0.0 for b in actif.values()
+        ), "aucun bucket ne doit porter un amort sans brut"
+        assert "Créances et emplois assimilés" not in actif
+        assert "Autres créances" not in actif
+
+        report = check_balance_coherence(rows)
+        assert report.is_balanced is False
+        anomaly = next(a for a in report.anomalies if a.compte == "496")
+        assert "sans creance correspondante" in anomaly.motif
+        assert "non mappe" not in anomaly.motif
+
+    def test_amort_miroir_ordre_inverse(self):
+        """The contra row may precede the account it mirrors."""
+        rows = [
+            {"compte": "496", "debit": 0, "credit": 50_000},
+            {"compte": "461", "debit": 300_000, "credit": 0},
+            {"compte": "101", "debit": 0, "credit": 250_000},
+        ]
+        autres = compute_financial_statements(rows)["bilan_actif"]["Autres créances"]
+        assert (autres["brut"], autres["amort"], autres["net"]) == (
+            300_000.0, 50_000.0, 250_000.0,
+        )
+
+    def test_miroir_ignore_un_tiers_crediteur(self):
+        """A 46x resolved to the passif side is not a valid mirror target."""
+        rows = [
+            {"compte": "461", "debit": 0, "credit": 300_000},  # dette -> passif
+            {"compte": "496", "debit": 0, "credit": 50_000},
+            {"compte": "521", "debit": 250_000, "credit": 0},
+        ]
+        actif = compute_financial_statements(rows)["bilan_actif"]
+        assert "Autres créances" not in actif
+
+        report = check_balance_coherence(rows)
+        anomaly = next(a for a in report.anomalies if a.compte == "496")
+        assert "sans creance correspondante" in anomaly.motif
+
+    def test_coherence_n_1(self):
+        """N and N-1 are checked independently."""
+        balance_n = [
+            {"compte": "521", "debit": 500_000, "credit": 0},
+            {"compte": "101", "debit": 0, "credit": 500_000},
+        ]
+        balance_n_1 = [
+            {"compte": "521", "debit": 500_000, "credit": 0},
+            {"compte": "101", "debit": 0, "credit": 300_000},  # ecart 200k
+        ]
+        statements = compute_financial_statements(balance_n, balance_n_1)
+
+        assert statements["coherence"]["is_balanced"] is True
+        assert statements["coherence_n_1"]["is_balanced"] is False
+        assert statements["coherence_n_1"]["ecart"] == 200_000.0
+
+    def test_pas_de_coherence_n_1_sans_balance_n_1(self):
+        statements = compute_financial_statements(
+            [{"compte": "521", "debit": 1, "credit": 0}]
+        )
+        assert "coherence_n_1" not in statements
 
     def test_sens_inverse_sur_un_compte_damortissement(self):
         """A debit balance on a 28 account is itself an anomaly."""

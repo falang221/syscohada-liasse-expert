@@ -1,7 +1,7 @@
 # SYSCOHADA — règles métier du moteur comptable
 
 Contexte partagé Claude Code / Antigravity.
-Dernière mise à jour : 2026-09-14 (mapping corrigé) · branche `test-agent/roo-syscohada-coherence`
+Dernière mise à jour : 2026-09-15 (miroir des dépréciations, cohérence N-1) · branche `fix/syscohada-bilan-coherence`
 
 ## 1. Invariant fondamental du bilan
 
@@ -13,7 +13,7 @@ balance tronquée, un compte non mappé, ou une écriture de sens inversé.
 Implémentation : `backend/app/core/coherence.py`
 Mapping : `backend/app/core/syscohada_rules.py`
 Agrégation : `backend/app/services/financial_engine.py` (`_aggregate_balance`)
-Tests : `backend/tests/test_coherence.py` (45) + `test_liasse_template.py` (8)
+Tests : `backend/tests/test_coherence.py` (53) + `test_liasse_template.py` (8)
 
 ```python
 from app.core.coherence import check_balance_coherence, format_anomaly_report
@@ -24,7 +24,9 @@ if not report.is_balanced:
 ```
 
 Le résultat est aussi exposé par le moteur : `compute_financial_statements()`
-renvoie désormais une clé `coherence` (dict sérialisable JSON).
+renvoie une clé `coherence` (dict sérialisable JSON), et une clé `coherence_n_1`
+lorsqu'une balance N-1 est fournie. Les deux exercices sont contrôlés
+indépendamment — un N équilibré ne garantit rien sur N-1.
 
 ### Tolérance
 
@@ -65,9 +67,14 @@ Un solde négatif sur son côté naturel = **sens inversé**, signalé comme ano
 | `Compte de bilan non mappé (classe N)` | Le compte existe dans la balance mais aucune règle de `MAPPING_RULES` ne le capte → il disparaît des deux totaux. Cause la plus fréquente d'écart. |
 | `Solde débiteur/créditeur anormal` | Sens inversé par rapport à la nature du compte. |
 | `Compte de gestion mappé sur le bilan` | Un compte de classe 6-8 pollue le bilan : bug de mapping. |
+| `Dépréciation sans créance / immobilisation correspondante` | Un `49x` ou `29x` dont le compte miroir est absent de la balance, résolu au passif, ou dont le numéro fait moins de 3 chiffres. Déduit du Total Actif mais non imputé à une ligne. |
 
 Les anomalies sont triées par **solde absolu décroissant** : le plus gros suspect
 apparaît en premier.
+
+> ⚠️ **`totaux_par_classe` est NET, pas brut.** Les contras (28, 29, 39, 49, 59)
+> y sont déduits de leur classe. Un rapprochement avec une balance brute doit en
+> tenir compte : la classe 2 affichée est `immobilisations − amortissements`.
 
 ## 4. ✅ Mapping corrigé (2026-09-14)
 
@@ -83,9 +90,9 @@ Les 15 préfixes de bilan qui manquaient sont désormais couverts.
 | `55`, `57`, `58` | Trésorerie-Actif | `bilan_actif` | `BQ` |
 | `45`, `46`, `47`, `48` | Comptes de tiers divers | `bilan_tiers` | `BJ` / `DJ` |
 | `28` | Amortissements des immobilisations | `bilan_actif` **contra** | `AE` |
-| `29` | Dépréciations des immobilisations financières | `bilan_actif` **contra** | `AF` |
+| `29` | Dépréciations des immobilisations | `bilan_actif` **contra miroir** | `AF` |
 | `39` | Dépréciations des stocks | `bilan_actif` **contra** | `AQ` |
-| `49` | Dépréciations des comptes de tiers | `bilan_actif` **contra** | `BA` |
+| `49` | Dépréciations des comptes de tiers | `bilan_actif` **contra miroir** | `BA` |
 | `59` | Dépréciations de trésorerie | `bilan_actif` **contra** | `BQ` |
 
 ### ⚠️ L'ordre des règles est significatif
@@ -134,6 +141,57 @@ Le `net` est calculé en **passe finale**, après lecture de toutes les lignes.
 Conséquence : l'ordre des lignes dans la balance n'a aucune importance — un
 amortissement peut précéder l'immobilisation qu'il réduit
 (`test_amort_avant_immobilisation_dans_la_balance`).
+
+### Cible dynamique : le miroir `49D → 4D` et `29D → 2D`
+
+Les contras ne visent pas tous un seau fixe. Convention de numérotation du plan :
+**le 3ᵉ chiffre d'un compte de dépréciation reprend le 2ᵉ chiffre du compte
+qu'il déprécie.**
+
+```
+491 → 41x (clients)              291 → 21x (incorporelles)
+496 → 46x (débiteurs divers)     294 → 24x (corporelles)
+497 → 47x                        296 → 26x (titres de participation)
+```
+
+**Pourquoi c'est nécessaire.** Une créance `461` débitrice est agrégée dans
+« Autres créances » (BJ) par la résolution `sign_based`, pas dans « Créances et
+emplois assimilés » (BA). Une règle statique `49 → BA` faisait donc atterrir la
+dépréciation d'un `461` sur un seau au `brut` nul → **ligne nette négative**,
+pendant que le `461` restait présenté brut, non déprécié. Les totaux restaient
+justes (`coherence` déduit du Total Actif) ; seule la présentation mentait.
+
+**Pas de fusion des seaux.** BA et BJ sont deux lignes distinctes de la liasse
+DGID. Les fusionner corrigerait le symptôme en cassant le format réglementaire.
+
+`28`, `39`, `59` gardent une cible statique : leur miroir donnerait le même seau.
+
+### Les trois passes de `_aggregate_balance`
+
+1. **Lignes non-contra.** Résolution `sign_based` des 45-48 ici. Chaque atterrissage
+   à l'actif est mémorisé par préfixe à 2 chiffres.
+2. **Lignes contra.** Cible statique pour 28/39/59 ; miroir pour 29/49.
+3. **`net = brut − amort`.**
+
+L'ordre des lignes n'a donc aucune importance : un `496` placé avant son `461`
+donne le même résultat (`test_amort_miroir_ordre_inverse`).
+
+### Dépréciation orpheline
+
+Si le miroir est **absent de la balance**, **résolu au passif** (un `461`
+créditeur est une dette, pas une créance), ou si le numéro fait moins de
+3 chiffres : **aucun seau n'est créé**. Un `amort` sur un `brut` nul produirait
+une ligne négative fantôme.
+
+La dépréciation reste **déduite du Total Actif** par `check_balance_coherence`,
+et le compte est signalé avec un motif dédié :
+
+```
+Depreciation sans creance correspondante : aucun compte 46 a l'actif
+- deduite du total mais non imputee
+```
+
+Un `logger.warning` est également émis côté moteur.
 
 ### Dans `check_balance_coherence`
 
@@ -216,7 +274,7 @@ Aucune donnée comptable réelle dans les tests. Deux fixtures de référence :
 
 ```bash
 cd backend
-./venv/bin/pytest tests/test_coherence.py -v        # 45 tests
+./venv/bin/pytest tests/test_coherence.py -v        # 53 tests
 ./venv/bin/pytest tests/test_liasse_template.py -v # 8 tests de rendu
-./venv/bin/pytest tests/ -q                        # suite complète, 64 tests
+./venv/bin/pytest tests/ -q                        # suite complète, 72 tests
 ```

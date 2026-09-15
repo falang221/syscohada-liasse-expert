@@ -20,7 +20,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal
 
-from app.core.syscohada_rules import get_category_for_account, resolve_tiers_side
+from app.core.syscohada_rules import (
+    get_category_for_account,
+    mirror_prefix,
+    resolve_tiers_side,
+)
 
 # Monetary tolerance in XOF. SYSCOHADA statements are presented in whole francs,
 # so anything at or below one franc is a rounding artefact, not an imbalance.
@@ -126,6 +130,21 @@ def _resolve(compte: str, solde_debiteur: float) -> Dict:
     return resolve_tiers_side(get_category_for_account(compte), solde_debiteur)
 
 
+def _actif_prefixes(parsed_balance: List[Dict]) -> set:
+    """Two-digit prefixes of the non-contra accounts landing on the actif side."""
+    prefixes = set()
+    for row in parsed_balance or []:
+        compte = str(row.get("compte", "")).strip()
+        if not compte:
+            continue
+        debit = float(row.get("debit", 0.0) or 0.0)
+        credit = float(row.get("credit", 0.0) or 0.0)
+        mapping = _resolve(compte, debit - credit)
+        if not mapping.get("contra") and mapping["type"] == "bilan_actif":
+            prefixes.add(compte[:2])
+    return prefixes
+
+
 def _side_for(compte: str, solde_debiteur: float = 0.0) -> Side:
     """Map an account to the balance-sheet side it contributes to."""
     mapping = _resolve(compte, solde_debiteur)
@@ -155,6 +174,10 @@ def check_balance_coherence(
     total_passif = 0.0
     totaux_par_classe: Dict[str, float] = {}
     candidates: List[AccountAnomaly] = []
+
+    # Pre-pass: which two-digit prefixes actually land on the actif side.
+    # Mirror-based contra accounts (29x, 49x) are flagged when theirs is absent.
+    actif_prefixes = _actif_prefixes(parsed_balance)
 
     for row in parsed_balance or []:
         compte = str(row.get("compte", "")).strip()
@@ -190,7 +213,11 @@ def check_balance_coherence(
         if classe in BALANCE_SHEET_CLASSES:
             totaux_par_classe[classe] = totaux_par_classe.get(classe, 0.0) + contribution
 
-        motif = _diagnose(compte, classe, side, solde, mapping["type"], is_contra)
+        motif = _diagnose(
+            compte, classe, side, solde, mapping["type"], is_contra,
+            is_mirror=mapping.get("mirror", False),
+            actif_prefixes=actif_prefixes,
+        )
         if motif:
             candidates.append(
                 AccountAnomaly(
@@ -234,6 +261,8 @@ def _diagnose(
     solde: float,
     cat_type: str,
     is_contra: bool = False,
+    is_mirror: bool = False,
+    actif_prefixes: set | None = None,
 ) -> str:
     """Return why an account is suspect, or an empty string when it is not.
 
@@ -247,6 +276,15 @@ def _diagnose(
                 f"Solde debiteur anormal pour un compte d'amortissement ou de "
                 f"depreciation (classe {classe}) - sens inverse probable"
             )
+        if is_mirror:
+            prefix = mirror_prefix(compte)
+            if prefix is None or prefix not in (actif_prefixes or set()):
+                cible = "creance" if classe == "4" else "immobilisation"
+                attendu = prefix or f"{compte[:1]}x (numero trop court)"
+                return (
+                    f"Depreciation sans {cible} correspondante : aucun compte "
+                    f"{attendu} a l'actif - deduite du total mais non imputee"
+                )
         return ""
 
     if classe not in BALANCE_SHEET_CLASSES:

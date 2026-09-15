@@ -18,14 +18,16 @@ MAPPING_RULES = [
     {"prefix": ("28",), "category": "Immobilisations incorporelles et corporelles",
      "type": "bilan_actif", "code": "AE", "contra": True,
      "reduces": "Immobilisations incorporelles et corporelles"},
-    {"prefix": ("29",), "category": "Immobilisations financières",
-     "type": "bilan_actif", "code": "AF", "contra": True,
+    # 29 and 49 target their mirror account rather than a fixed bucket:
+    # 29D depreciates 2D, 49D depreciates 4D (see mirror_prefix).
+    {"prefix": ("29",), "category": "Dépréciations des immobilisations",
+     "type": "bilan_actif", "code": "AF", "contra": True, "mirror": True,
      "reduces": "Immobilisations financières"},
     {"prefix": ("39",), "category": "Stocks",
      "type": "bilan_actif", "code": "AQ", "contra": True,
      "reduces": "Stocks"},
-    {"prefix": ("49",), "category": "Créances et emplois assimilés",
-     "type": "bilan_actif", "code": "BA", "contra": True,
+    {"prefix": ("49",), "category": "Dépréciations des comptes de tiers",
+     "type": "bilan_actif", "code": "BA", "contra": True, "mirror": True,
      "reduces": "Créances et emplois assimilés"},
     {"prefix": ("59",), "category": "Trésorerie-Actif",
      "type": "bilan_actif", "code": "BQ", "contra": True,
@@ -79,6 +81,29 @@ def get_category_for_account(account_number: str) -> dict:
                     "contra": rule.get("contra", False),
                     "sign_based": rule.get("sign_based", False)}
     return {**_UNKNOWN, "contra": False, "sign_based": False}
+
+
+def mirror_prefix(account_number: str) -> str | None:
+    """Return the account prefix a mirror-based contra account depreciates.
+
+    SYSCOHADA numbering convention: the third digit of a depreciation account
+    repeats the second digit of the account it reduces.
+
+        491 -> 41 (clients)        496 -> 46 (debiteurs divers)
+        291 -> 21 (incorporelles)  296 -> 26 (titres de participation)
+
+    Returns None when the account is too short to carry a mirror digit, which
+    the caller must treat as 'unresolvable' rather than falling back to a
+    static bucket.
+    """
+    acc = str(account_number).strip()
+    if len(acc) < 3:
+        return None
+    if acc.startswith("49"):
+        return "4" + acc[2]
+    if acc.startswith("29"):
+        return "2" + acc[2]
+    return None
 
 
 def resolve_tiers_side(mapping: dict, solde_debiteur: float) -> dict:

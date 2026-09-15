@@ -1,7 +1,7 @@
 # SYSCOHADA — règles métier du moteur comptable
 
 Contexte partagé Claude Code / Antigravity.
-Dernière mise à jour : 2026-09-15 (miroir des dépréciations, cohérence N-1) · branche `fix/syscohada-bilan-coherence`
+Dernière mise à jour : 2026-09-15 (garde anti-fantôme, N-1 rendu) · branche `fix/syscohada-bilan-coherence`
 
 ## 1. Invariant fondamental du bilan
 
@@ -13,7 +13,7 @@ balance tronquée, un compte non mappé, ou une écriture de sens inversé.
 Implémentation : `backend/app/core/coherence.py`
 Mapping : `backend/app/core/syscohada_rules.py`
 Agrégation : `backend/app/services/financial_engine.py` (`_aggregate_balance`)
-Tests : `backend/tests/test_coherence.py` (53) + `test_liasse_template.py` (8)
+Tests : `backend/tests/test_coherence.py` (58) + `test_liasse_template.py` (10)
 
 ```python
 from app.core.coherence import check_balance_coherence, format_anomaly_report
@@ -67,7 +67,7 @@ Un solde négatif sur son côté naturel = **sens inversé**, signalé comme ano
 | `Compte de bilan non mappé (classe N)` | Le compte existe dans la balance mais aucune règle de `MAPPING_RULES` ne le capte → il disparaît des deux totaux. Cause la plus fréquente d'écart. |
 | `Solde débiteur/créditeur anormal` | Sens inversé par rapport à la nature du compte. |
 | `Compte de gestion mappé sur le bilan` | Un compte de classe 6-8 pollue le bilan : bug de mapping. |
-| `Dépréciation sans créance / immobilisation correspondante` | Un `49x` ou `29x` dont le compte miroir est absent de la balance, résolu au passif, ou dont le numéro fait moins de 3 chiffres. Déduit du Total Actif mais non imputé à une ligne. |
+| `Dépréciation sans créance / immobilisation / stock correspondant` | Tout contra (`28x`, `29x`, `39x`, `49x`, `59x`) dont le seau cible est absent ou de `brut` nul — y compris un compte soldé. Déduit du Total Actif mais non imputé à une ligne. |
 
 Les anomalies sont triées par **solde absolu décroissant** : le plus gros suspect
 apparaît en premier.
@@ -176,22 +176,55 @@ DGID. Les fusionner corrigerait le symptôme en cassant le format réglementaire
 L'ordre des lignes n'a donc aucune importance : un `496` placé avant son `461`
 donne le même résultat (`test_amort_miroir_ordre_inverse`).
 
-### Dépréciation orpheline
+### Règle d'imputation : seau cible avec `brut != 0`
 
-Si le miroir est **absent de la balance**, **résolu au passif** (un `461`
-créditeur est une dette, pas une créance), ou si le numéro fait moins de
-3 chiffres : **aucun seau n'est créé**. Un `amort` sur un `brut` nul produirait
-une ligne négative fantôme.
+La règle vaut pour **tous** les contras, statiques comme miroirs :
 
-La dépréciation reste **déduite du Total Actif** par `check_balance_coherence`,
-et le compte est signalé avec un motif dédié :
+> Un contra n'est imputé que si son seau cible **existe déjà avec un `brut`
+> non nul** à l'issue de la passe 1.
+
+Le test se fait par **accès en lecture** (`res["bilan_actif"].get(...)`), jamais
+par `_ensure_bucket` — qui créerait le fantôme au moment même de le tester.
+
+Quatre situations laissent un contra non imputé :
+
+| Cas | Exemple |
+|---|---|
+| Cible absente de la balance | `2841` seul, sans aucun `2x` |
+| Miroir absent | `496` sans `46x` à l'actif |
+| **Compte soldé** (`débit == crédit`) | `461` 100k/100k → seau créé mais `brut = 0` |
+| Miroir résolu au passif | `461` créditeur est une dette, pas une créance |
+| Numéro de moins de 3 chiffres | `49` sans chiffre miroir |
+
+Le cas du **compte soldé** est fréquent dans les exports réels : la passe 1 crée
+bien le seau, mais avec un `brut` nul. Sans la garde, le contra s'y imputait et
+produisait une ligne nette négative.
+
+Dans tous ces cas la dépréciation reste **déduite du Total Actif** par
+`check_balance_coherence`, le compte est signalé avec un motif dédié, et un
+`logger.warning` est émis côté moteur :
 
 ```
 Depreciation sans creance correspondante : aucun compte 46 a l'actif
 - deduite du total mais non imputee
+
+Depreciation sans immobilisation correspondante : aucun brut sur
+'Immobilisations incorporelles et corporelles' - deduite du total mais non imputee
 ```
 
-Un `logger.warning` est également émis côté moteur.
+> ⚠️ **Divergence assumée des deux totaux.** En présence d'un orphelin, le TOTAL
+> ACTIF du tableau (somme des seaux) et celui de l'annexe
+> (`coherence.total_actif`, qui déduit le contra) **ne coïncident pas**. Exemple :
+> un `2841` seul donne `0` au tableau et `-200 000` à l'annexe. C'est voulu — le
+> tableau ne doit afficher aucune ligne fantôme, et l'annexe doit signaler
+> l'anomalie sur le total.
+
+### Imputation agrégée au seau
+
+L'imputation vise **la ligne agrégée de la liasse**, pas le compte individuel.
+Si `461` est soldé mais que `471` alimente « Autres créances », un `496`
+s'impute sur BJ. BJ étant une ligne agrégée du formulaire DGID, le comportement
+est acceptable — verrouillé par `test_imputation_agregee_au_seau`.
 
 ### Dans `check_balance_coherence`
 
@@ -232,6 +265,9 @@ total agrège les amortissements.
 
 Affiché en tête du BILAN - ACTIF uniquement si `statements.coherence.is_balanced`
 est faux : montant de l'écart, sens, renvoi vers l'annexe.
+
+Un second bandeau, dans l'annexe, signale un **exercice N-1 déséquilibré**
+(`coherence_n_1`). Un N équilibré ne masque donc plus un N-1 qui ne l'est pas.
 
 ### Annexe de contrôle
 
@@ -274,7 +310,7 @@ Aucune donnée comptable réelle dans les tests. Deux fixtures de référence :
 
 ```bash
 cd backend
-./venv/bin/pytest tests/test_coherence.py -v        # 53 tests
-./venv/bin/pytest tests/test_liasse_template.py -v # 8 tests de rendu
-./venv/bin/pytest tests/ -q                        # suite complète, 72 tests
+./venv/bin/pytest tests/test_coherence.py -v        # 58 tests
+./venv/bin/pytest tests/test_liasse_template.py -v # 10 tests de rendu
+./venv/bin/pytest tests/ -q                        # suite complète, 79 tests
 ```

@@ -381,6 +381,14 @@
             </tbody>
         </table>
 
+        {% if statements.coherence_n_1 and not statements.coherence_n_1.is_balanced %}
+        <div class="coherence-banner ko" style="margin-top: 8px;">
+            ⚠ EXERCICE N-1 NON ÉQUILIBRÉ — écart de
+            <span class="ecart">{{ "{:,.0f}".format(statements.coherence_n_1.ecart|abs).replace(',', ' ') }}</span> FCFA
+            ({{ statements.coherence_n_1.sens_ecart }})
+        </div>
+        {% endif %}
+
         {% if statements.coherence.is_balanced %}
         <div style="padding: 10px; border: 1px dashed #000; font-size: 8pt;">
             <span style="color: green;">✓ Bilan équilibré : Total Actif = Total Passif.</span>

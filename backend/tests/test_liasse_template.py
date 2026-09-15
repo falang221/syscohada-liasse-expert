@@ -101,6 +101,31 @@ class TestAnnexeDeControle:
         assert "141" in html
         assert "non mappe" in html
 
+    def test_annexe_affiche_n1_desequilibre(self, template, rows_equilibre):
+        """A balanced N must not hide an unbalanced N-1."""
+        balance_n_1 = [
+            {"compte": "521", "debit": 500_000, "credit": 0},
+            {"compte": "101", "debit": 0, "credit": 300_000},  # ecart 200k
+        ]
+        statements = compute_financial_statements(rows_equilibre, balance_n_1)
+        html = template.render(
+            statements=statements, client_info={}, ai_commentary=None, exercice="2026"
+        )
+
+        assert "EXERCICE N-1 NON ÉQUILIBRÉ" in html
+        assert "200 000" in html
+        # The N banner must stay absent: N itself is balanced.
+        assert "BILAN NON ÉQUILIBRÉ" not in html
+
+    def test_annexe_muette_quand_n1_equilibre(self, template, rows_equilibre):
+        statements = compute_financial_statements(rows_equilibre, rows_equilibre)
+        html = template.render(
+            statements=statements, client_info={}, ai_commentary=None, exercice="2026"
+        )
+        # "RÉSULTAT NET EXERCICE N-1" exists elsewhere in the liasse: assert on
+        # the banner wording only.
+        assert "EXERCICE N-1 NON ÉQUILIBRÉ" not in html
+
     def test_rendu_sans_cle_coherence_ne_casse_pas(self, template, rows_equilibre):
         """Older payloads without the coherence key must still render."""
         statements = compute_financial_statements(rows_equilibre)

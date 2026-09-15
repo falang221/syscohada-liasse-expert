@@ -130,9 +130,17 @@ def _resolve(compte: str, solde_debiteur: float) -> Dict:
     return resolve_tiers_side(get_category_for_account(compte), solde_debiteur)
 
 
-def _actif_prefixes(parsed_balance: List[Dict]) -> set:
-    """Two-digit prefixes of the non-contra accounts landing on the actif side."""
-    prefixes = set()
+def _actif_index(parsed_balance: List[Dict]) -> Dict[str, Dict]:
+    """Mirror what pass 1 of ``_aggregate_balance`` builds.
+
+    Returns ``{"par_prefixe": {"46": "Autres créances", ...},
+    "brut_non_nul": {"Autres créances", ...}}`` so a contra can be tested
+    against the same condition the engine applies: does the target bucket
+    exist with a non-zero brut?
+    """
+    par_prefixe: Dict[str, str] = {}
+    brut_par_categorie: Dict[str, float] = {}
+
     for row in parsed_balance or []:
         compte = str(row.get("compte", "")).strip()
         if not compte:
@@ -140,9 +148,30 @@ def _actif_prefixes(parsed_balance: List[Dict]) -> set:
         debit = float(row.get("debit", 0.0) or 0.0)
         credit = float(row.get("credit", 0.0) or 0.0)
         mapping = _resolve(compte, debit - credit)
-        if not mapping.get("contra") and mapping["type"] == "bilan_actif":
-            prefixes.add(compte[:2])
-    return prefixes
+        if mapping.get("contra") or mapping["type"] != "bilan_actif":
+            continue
+        categorie = mapping["category"]
+        par_prefixe[compte[:2]] = categorie
+        brut_par_categorie[categorie] = (
+            brut_par_categorie.get(categorie, 0.0) + debit - credit
+        )
+
+    return {
+        "par_prefixe": par_prefixe,
+        "brut_non_nul": {c for c, v in brut_par_categorie.items() if v != 0.0},
+    }
+
+
+def _contra_target(compte: str, mapping: Dict, index: Dict) -> str | None:
+    """Category a contra account would be imputed to, or None."""
+    if mapping.get("mirror"):
+        prefix = mirror_prefix(compte)
+        return index["par_prefixe"].get(prefix) if prefix else None
+    return mapping.get("reduces", mapping["category"])
+
+
+_CIBLE_PAR_CLASSE = {"2": "immobilisation", "3": "stock", "4": "creance", "5": "disponibilite"}
+_EMPTY_INDEX: Dict[str, Dict] = {"par_prefixe": {}, "brut_non_nul": set()}
 
 
 def _side_for(compte: str, solde_debiteur: float = 0.0) -> Side:
@@ -177,7 +206,7 @@ def check_balance_coherence(
 
     # Pre-pass: which two-digit prefixes actually land on the actif side.
     # Mirror-based contra accounts (29x, 49x) are flagged when theirs is absent.
-    actif_prefixes = _actif_prefixes(parsed_balance)
+    index = _actif_index(parsed_balance)
 
     for row in parsed_balance or []:
         compte = str(row.get("compte", "")).strip()
@@ -216,7 +245,7 @@ def check_balance_coherence(
         motif = _diagnose(
             compte, classe, side, solde, mapping["type"], is_contra,
             is_mirror=mapping.get("mirror", False),
-            actif_prefixes=actif_prefixes,
+            mapping=mapping, index=index,
         )
         if motif:
             candidates.append(
@@ -262,7 +291,8 @@ def _diagnose(
     cat_type: str,
     is_contra: bool = False,
     is_mirror: bool = False,
-    actif_prefixes: set | None = None,
+    mapping: Dict | None = None,
+    index: Dict | None = None,
 ) -> str:
     """Return why an account is suspect, or an empty string when it is not.
 
@@ -276,15 +306,21 @@ def _diagnose(
                 f"Solde debiteur anormal pour un compte d'amortissement ou de "
                 f"depreciation (classe {classe}) - sens inverse probable"
             )
-        if is_mirror:
-            prefix = mirror_prefix(compte)
-            if prefix is None or prefix not in (actif_prefixes or set()):
-                cible = "creance" if classe == "4" else "immobilisation"
-                attendu = prefix or f"{compte[:1]}x (numero trop court)"
-                return (
-                    f"Depreciation sans {cible} correspondante : aucun compte "
-                    f"{attendu} a l'actif - deduite du total mais non imputee"
+        target = _contra_target(compte, mapping or {}, index or _EMPTY_INDEX)
+        if target is None or target not in (index or _EMPTY_INDEX)["brut_non_nul"]:
+            cible = _CIBLE_PAR_CLASSE.get(classe, "immobilisation")
+            if is_mirror:
+                prefix = mirror_prefix(compte)
+                attendu = (
+                    f"aucun compte {prefix} a l'actif" if prefix
+                    else "numero trop court pour un miroir"
                 )
+            else:
+                attendu = f"aucun brut sur '{target}'"
+            return (
+                f"Depreciation sans {cible} correspondante : {attendu} "
+                "- deduite du total mais non imputee"
+            )
         return ""
 
     if classe not in BALANCE_SHEET_CLASSES:

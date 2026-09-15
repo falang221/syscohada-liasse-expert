@@ -29,9 +29,11 @@ def _aggregate_balance(parsed_balance: List[Dict]) -> Dict:
     2. Contra rows. 28/39/59 use their static `reduces` target. 29/49 follow
        the mirror convention (49D reduces 4D, 29D reduces 2D) and land in the
        bucket their mirror actually reached in pass 1 - which may be BJ
-       "Autres créances" rather than BA. A mirror that is absent from the
-       balance, or that resolved to the passif side, creates NO bucket: an
-       amort column on an empty brut would render a negative net line.
+       "Autres créances" rather than BA. Whatever the route, a contra is
+       imputed ONLY onto a bucket pass 1 filled with a non-zero brut. Missing
+       target, settled account (debit == credit) or a mirror resolved to the
+       passif side all leave it unimputed: an amort column over an empty brut
+       would render a negative net line.
     3. net = brut - amort.
     """
     res = { "bilan_actif": {}, "bilan_passif": {}, "resultat_charge": {}, "resultat_produit": {}, "unknown": {} }
@@ -79,19 +81,23 @@ def _aggregate_balance(parsed_balance: List[Dict]) -> Dict:
         if mapping.get("mirror"):
             prefix = mirror_prefix(compte)
             target = landed_actif.get(prefix) if prefix else None
-            if target is None:
-                # Orphan depreciation: no matching asset on the actif side.
-                # check_balance_coherence reports it and still deducts it from
-                # Total Actif; creating a bucket here would invent a line.
-                logger.warning(
-                    "Depreciation %s sans compte miroir actif (%s) - non imputee",
-                    compte, prefix or "prefixe trop court",
-                )
-                continue
         else:
             target = mapping.get("reduces", mapping["category"])
 
-        _ensure_bucket(res, "bilan_actif", target, mapping["code"])["amort"] += credit - debit
+        # Read-only probe: _ensure_bucket would create the very phantom we are
+        # trying to avoid. A contra is imputed only onto a bucket that pass 1
+        # actually filled - an amort over a zero brut renders a negative line.
+        bucket = res["bilan_actif"].get(target) if target else None
+        if bucket is None or bucket["brut"] == 0.0:
+            # Orphan contra. check_balance_coherence reports it and still
+            # deducts it from Total Actif; no bucket is created here.
+            logger.warning(
+                "Contra %s non impute : cible '%s' absente ou de brut nul",
+                compte, target or "introuvable",
+            )
+            continue
+
+        bucket["amort"] += credit - debit
 
     # --- Pass 3: net = brut - amort. Only actif carries an amort column. ----
     for cat_type, buckets in res.items():

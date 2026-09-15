@@ -447,6 +447,75 @@ class TestMappingCorrige:
         anomaly = next(a for a in report.anomalies if a.compte == "496")
         assert "sans creance correspondante" in anomaly.motif
 
+    def test_contra_statique_orphelin_sans_fantome(self):
+        """A 2841 alone must not create an AE bucket with brut 0 / net -200k."""
+        rows = [{"compte": "2841", "debit": 0, "credit": 200_000}]
+        actif = compute_financial_statements(rows)["bilan_actif"]
+
+        assert not [
+            name for name, b in actif.items() if b["amort"] > 0 and b["brut"] == 0
+        ], "aucun seau ne doit porter un amort sans brut"
+        assert all(b["net"] >= 0 for b in actif.values())
+
+        report = check_balance_coherence(rows)
+        anomaly = next(a for a in report.anomalies if a.compte == "2841")
+        assert "sans immobilisation correspondante" in anomaly.motif
+        assert "non imputee" in anomaly.motif
+
+    @pytest.mark.parametrize("compte,cible", [("391", "stock"), ("591", "disponibilite")])
+    def test_autres_contras_statiques_orphelins(self, compte, cible):
+        rows = [{"compte": compte, "debit": 0, "credit": 100_000}]
+        actif = compute_financial_statements(rows)["bilan_actif"]
+
+        assert not [b for b in actif.values() if b["amort"] > 0 and b["brut"] == 0]
+        anomaly = next(
+            a for a in check_balance_coherence(rows).anomalies if a.compte == compte
+        )
+        assert f"sans {cible} correspondante" in anomaly.motif
+
+    def test_miroir_solde_nimpute_pas(self):
+        """A settled 461 (debit == credit) is a zero-brut bucket, not a target.
+
+        Settled accounts are common in real trial-balance exports.
+        """
+        rows = [
+            {"compte": "461", "debit": 100_000, "credit": 100_000},  # solde
+            {"compte": "496", "debit": 0, "credit": 50_000},
+        ]
+        actif = compute_financial_statements(rows)["bilan_actif"]
+
+        # Pass 1 did create the bucket, but with brut 0.
+        assert "Autres créances" in actif
+        assert actif["Autres créances"]["brut"] == 0.0
+        assert actif["Autres créances"]["amort"] == 0.0, "le 496 ne doit pas s'imputer"
+        assert actif["Autres créances"]["net"] == 0.0
+
+        anomaly = next(
+            a for a in check_balance_coherence(rows).anomalies if a.compte == "496"
+        )
+        assert "sans creance correspondante" in anomaly.motif
+
+    def test_imputation_agregee_au_seau(self):
+        """Documented behaviour: imputation targets the aggregated DGID line.
+
+        461 is settled but 471 feeds "Autres créances", so the 496 lands there.
+        BJ is a single aggregated line of the liasse - this is acceptable.
+        """
+        rows = [
+            {"compte": "461", "debit": 100_000, "credit": 100_000},  # solde
+            {"compte": "471", "debit": 300_000, "credit": 0},
+            {"compte": "496", "debit": 0, "credit": 50_000},
+            {"compte": "101", "debit": 0, "credit": 250_000},
+        ]
+        autres = compute_financial_statements(rows)["bilan_actif"]["Autres créances"]
+        assert (autres["brut"], autres["amort"], autres["net"]) == (
+            300_000.0, 50_000.0, 250_000.0,
+        )
+
+        report = check_balance_coherence(rows)
+        assert report.total_actif == 250_000.0
+        assert report.is_balanced is True
+
     def test_coherence_n_1(self):
         """N and N-1 are checked independently."""
         balance_n = [

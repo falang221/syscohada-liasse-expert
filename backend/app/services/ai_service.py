@@ -1,18 +1,38 @@
+import logging
 import os
-from mistralai import Mistral
-from typing import Dict
+from mistralai.client.sdk import Mistral
+from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 # Key is handled in .env
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
 
-def generate_financial_commentary(statements: Dict) -> str:
+# The model is deliberately configurable: API tiers differ, and a hardcoded
+# name that the account cannot reach fails on every single call.
+DEFAULT_MISTRAL_MODEL = "mistral-large-latest"
+
+
+def get_mistral_model() -> str:
+    """Model used for the commentary. Override with MISTRAL_MODEL."""
+    return os.environ.get("MISTRAL_MODEL") or DEFAULT_MISTRAL_MODEL
+
+
+def generate_financial_commentary(statements: Dict) -> Optional[str]:
     """
     Analyzes the financial statements and uses Mistral to generate a professional
     commentary on the significant variations.
+
+    Returns None when the commentary cannot be produced - missing key, API
+    error, empty response. Callers must treat None as "no commentary" and omit
+    the section entirely. NEVER return an error string: this value is rendered
+    in the liasse PDF under "NOTE DE SYNTHÈSE DE LA DIRECTION", a document
+    handed to the client.
     """
     if not MISTRAL_API_KEY:
-        return "Erreur : Clé API Mistral non configurée."
-        
+        logger.warning("MISTRAL_API_KEY absente - commentaire IA ignore")
+        return None
+
     client = Mistral(api_key=MISTRAL_API_KEY)
     
     # 1. Extract significant data
@@ -44,15 +64,23 @@ def generate_financial_commentary(statements: Dict) -> str:
     - Ne mets pas d'introduction du type "Voici la note". Donne directement le texte final.
     """
     
+    model = get_mistral_model()
     try:
         chat_response = client.chat.complete(
-            model="mistral-large-latest",
+            model=model,
             messages=[
                 {"role": "system", "content": "Tu es un expert-comptable de haut niveau."},
                 {"role": "user", "content": prompt},
             ]
         )
-        return chat_response.choices[0].message.content
-    except Exception as e:
-        print(f"Mistral API Error: {str(e)}")
-        return f"Une erreur est survenue lors de la génération IA : {str(e)}"
+        commentaire = chat_response.choices[0].message.content
+    except Exception:
+        # Full context stays in the logs; nothing leaks into the PDF.
+        logger.exception("Appel Mistral echoue (modele=%s) - commentaire ignore", model)
+        return None
+
+    if not commentaire or not commentaire.strip():
+        logger.warning("Reponse Mistral vide (modele=%s) - commentaire ignore", model)
+        return None
+
+    return commentaire.strip()

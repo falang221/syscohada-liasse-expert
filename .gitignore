@@ -32,3 +32,25 @@ ENV/
 
 # OS
 .DS_Store
+
+# Secrets — jamais versionnés. Voir backend/.env.example
+.env
+*.env
+!*.env.example
+.env.local
+.env.*.local
+
+# Bases de données locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Next.js
+.next/
+out/
+node_modules/
+
+# Outils d'agents
+.aider*
+.goose/
+.pdm-python
